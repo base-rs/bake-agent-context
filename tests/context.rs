@@ -2,7 +2,7 @@
 // Copyright, 2026, by Samuel Williams.
 
 use bake::Registry;
-use bake_agent_context::{ContextIndex, Installer, install_skills, list_skills};
+use bake_agent_context::{Installer, install_skills, list_skills};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -231,7 +231,7 @@ fn names_the_usage_skill_from_its_file_and_package() {
     write(
         &provider,
         "context/usage.md",
-        "---\ntype: skill\ndescription: Use this skill to install and navigate dependency context.\n---\n\n# Usage\n\nInstall context and follow the generated index.\n",
+        "---\ntype: skill\ndescription: Use this skill to install and navigate dependency context.\n---\n\n# Usage\n\nInstall context and read the relevant Markdown guides.\n",
     );
 
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
@@ -375,7 +375,7 @@ fn skill_installation_works_without_a_git_checkout() {
 }
 
 #[test]
-fn installs_context_and_updates_index_without_changing_agents_file() {
+fn installs_context_and_skills_without_changing_agents_file() {
     let (_directory, root) = project();
     write(
         &root,
@@ -413,45 +413,44 @@ fn installs_context_and_updates_index_without_changing_agents_file() {
         "# Agent\n\nProject-specific introduction.\n\n## Context\n\nOld generated section.\n\n## Commands\n\nKeep this section.\n"
     );
 
-    let index_path = root.join(".agents/context/index.md");
-    let first = fs::read_to_string(&index_path).unwrap();
-    assert!(first.contains("# Context Index"));
-    assert!(first.contains("## docs-provider"));
-    assert!(first.contains("Guidance from the test provider."));
-    assert!(first.contains("[Getting Started](docs-provider/getting-started.md)"));
-    assert!(!first.contains("Set up a new Ruby gem using the project conventions."));
-    assert!(first.contains("First paragraph."));
-    assert!(!first.contains("Later details."));
-
-    let installer = Installer::discover(&root).unwrap();
-    let index = ContextIndex::new(&root).with_packages(installer.packages());
-    index.update_index().unwrap();
-    assert_eq!(fs::read_to_string(index_path).unwrap(), first);
+    assert!(!root.join(".agents/context/index.md").exists());
 }
 
 #[test]
-fn context_index_does_not_create_or_modify_agents_file() {
+fn context_only_installation_updates_git_exclusions() {
     let (_directory, root) = project();
-    let installer = Installer::discover(&root).unwrap();
-    installer.install_all().unwrap();
-    let index = ContextIndex::new(&root);
-
-    assert!(!root.join("agents.md").exists());
-    index.update_index().unwrap();
-    assert!(!root.join("agents.md").exists());
-    assert!(root.join(".agents/context/index.md").is_file());
-
-    let agents_file = "# Agent\n\nOwner-maintained project guidance.\n";
-    write(&root, "agents.md", agents_file);
-    index.update_index().unwrap();
-    assert_eq!(
-        fs::read_to_string(root.join("agents.md")).unwrap(),
-        agents_file
+    let provider = root.parent().unwrap().join("provider/context");
+    fs::remove_file(provider.join("initial-gem-setup.md")).unwrap();
+    fs::remove_dir_all(provider.join("initial-gem-setup")).unwrap();
+    assert!(
+        Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(&root)
+            .status()
+            .unwrap()
+            .success()
     );
+
+    let output = Registry::discover()
+        .unwrap()
+        .run_arguments(&root, &["agent:context:install".to_owned()])
+        .unwrap();
+    assert!(output.contains("Installed context from: docs-provider"));
+    let path = ".agents/context/docs-provider/getting-started.md";
+    assert!(root.join(path).is_file());
+    assert!(
+        Command::new("git")
+            .args(["check-ignore", "--quiet", path])
+            .current_dir(&root)
+            .status()
+            .unwrap()
+            .success()
+    );
+    assert!(!root.join(".agents/context/index.md").exists());
 }
 
 #[test]
-fn public_context_paths_render_fallback_titles_and_remove_empty_directories() {
+fn installs_documents_without_headings_and_omits_empty_directories() {
     let (_directory, root) = project();
     let provider = root.parent().unwrap().join("provider");
     write(
@@ -463,10 +462,6 @@ fn public_context_paths_render_fallback_titles_and_remove_empty_directories() {
 
     let installer = Installer::discover(&root).unwrap();
     assert_eq!(installer.context_path(), root.join(".agents/context"));
-    assert_eq!(
-        ContextIndex::new(&root).context_path(),
-        root.join(".agents/context")
-    );
     assert_eq!(installer.install_all().unwrap(), ["docs-provider"]);
     assert!(
         !root
@@ -474,23 +469,10 @@ fn public_context_paths_render_fallback_titles_and_remove_empty_directories() {
             .exists()
     );
 
-    let index = ContextIndex::new(&root);
-    let rendered = index.generate_index().unwrap();
-    assert!(rendered.contains("[no heading](docs-provider/no-heading.md)"));
-    assert!(rendered.contains("Words without punctuation"));
-
-    write(
-        &root,
-        ".agents/context/zeta/guide.md",
-        "# Zeta\n\nZeta guide.\n",
+    assert_eq!(
+        fs::read_to_string(root.join(".agents/context/docs-provider/no-heading.md")).unwrap(),
+        "Words without punctuation\n"
     );
-    write(
-        &root,
-        ".agents/context/alpha/guide.md",
-        "# Alpha\n\nAlpha guide.\n",
-    );
-    let rendered = index.generate_index().unwrap();
-    assert!(rendered.find("## alpha").unwrap() < rendered.find("## zeta").unwrap());
 }
 
 #[test]
@@ -561,13 +543,6 @@ fn discovers_multiple_context_providers_and_orders_their_skills() {
             "second-provider-release (second-provider)"
         ]
     );
-
-    let index = ContextIndex::new(&root).with_packages(installer.packages());
-    let rendered = index.generate_index().unwrap();
-    assert!(
-        rendered.find("## docs-provider").unwrap() < rendered.find("## second-provider").unwrap()
-    );
-    assert!(rendered.contains("A second context provider."));
 }
 
 #[test]
@@ -590,39 +565,6 @@ fn sorts_skills_within_a_provider_by_name() {
             "docs-provider-initial-gem-setup"
         ]
     );
-}
-
-#[test]
-fn context_index_includes_frontmatter_descriptions() {
-    let (_directory, root) = project();
-    let provider = root.parent().unwrap().join("provider");
-    write(
-        &provider,
-        "context/getting-started.md",
-        "---\ndescription: A concise getting started summary.\n---\n\n# Getting Started\n\nFirst paragraph.\n",
-    );
-    write(
-        &provider,
-        "context/undocumented.md",
-        "---\ndescription: '  '\n---\n\n# Undocumented\n\nNo summary is provided.\n",
-    );
-    write(
-        &provider,
-        "context/no-description.md",
-        "---\n---\n\n# No Description\n\nUse the first paragraph as its summary.\n",
-    );
-
-    let installer = Installer::discover(&root).unwrap();
-    installer.install_all().unwrap();
-    let rendered = ContextIndex::new(&root)
-        .with_packages(installer.packages())
-        .generate_index()
-        .unwrap();
-
-    assert!(rendered.contains("A concise getting started summary."));
-    assert!(rendered.contains("[Undocumented](docs-provider/undocumented.md)"));
-    assert!(rendered.contains("No summary is provided."));
-    assert!(rendered.contains("Use the first paragraph as its summary."));
 }
 
 #[test]
@@ -893,7 +835,7 @@ fn adds_a_final_newline_to_parsed_skill_documents() {
 }
 
 #[test]
-fn reports_public_index_installer_and_cargo_metadata_errors() {
+fn reports_public_installer_and_cargo_metadata_errors() {
     let (_directory, root) = project();
     let installer = Installer::discover(&root).unwrap();
     fs::create_dir_all(root.join(".agents")).unwrap();
@@ -905,7 +847,6 @@ fn reports_public_index_installer_and_cargo_metadata_errors() {
             .to_string()
             .contains("cannot create")
     );
-    assert!(ContextIndex::new(&root).update_index().is_err());
 
     let directory = tempfile::tempdir().unwrap();
     write(
@@ -915,17 +856,6 @@ fn reports_public_index_installer_and_cargo_metadata_errors() {
     );
     let error = Installer::discover(directory.path()).unwrap_err();
     assert!(error.to_string().contains("cargo metadata failed"));
-
-    let directory = tempfile::tempdir().unwrap();
-    let index = ContextIndex::new(directory.path());
-    fs::create_dir_all(index.context_path().join("index.md")).unwrap();
-    assert!(
-        index
-            .update_index()
-            .unwrap_err()
-            .to_string()
-            .contains("cannot write")
-    );
 }
 
 #[test]
@@ -990,27 +920,6 @@ fn show_supports_implicit_markdown_extension_and_rejects_parent_paths() {
 }
 
 #[test]
-fn extracts_title_and_first_sentence_from_markdown() {
-    let (_directory, root) = project();
-    write(
-        &root.parent().unwrap().join("provider"),
-        "context/reference/usage.md",
-        "<!--\n# Not a title\n-->\n\n# Nested usage\n\nRead the guide first. Then apply its examples.\n",
-    );
-
-    let installer = Installer::discover(&root).unwrap();
-    installer.install_all().unwrap();
-
-    let section = ContextIndex::new(&root)
-        .with_packages(installer.packages())
-        .generate_index()
-        .unwrap();
-    assert!(section.contains("[Nested usage](docs-provider/reference/usage.md)"));
-    assert!(section.contains("Read the guide first."));
-    assert!(!section.contains("Then apply its examples."));
-}
-
-#[test]
 fn registers_the_ruby_compatible_task_names() {
     let registry = Registry::discover().unwrap();
     let names: Vec<_> = registry.tasks().map(|task| task.name()).collect();
@@ -1018,14 +927,14 @@ fn registers_the_ruby_compatible_task_names() {
     assert!(names.contains(&"agent:context:list"));
     assert!(names.contains(&"agent:context:show"));
     assert!(names.contains(&"agent:context:install"));
-    assert!(names.contains(&"agent:context:index"));
+    assert!(!names.contains(&"agent:context:index"));
     assert!(!names.contains(&"agent:context:agents-md"));
     assert!(names.contains(&"agent:context:skill:list"));
     assert!(names.contains(&"agent:context:skill:install"));
 }
 
 #[test]
-fn bake_tasks_cover_context_and_skill_lookup_installation_and_indexing() {
+fn bake_tasks_cover_context_and_skill_lookup_and_installation() {
     let (_directory, root) = project();
     let registry = Registry::discover().unwrap();
 
@@ -1157,14 +1066,7 @@ fn bake_tasks_cover_context_and_skill_lookup_installation_and_indexing() {
             .is_err()
     );
 
-    assert_eq!(
-        Registry::discover()
-            .unwrap()
-            .run_arguments(&root, &["agent:context:index".to_owned()])
-            .unwrap()
-            .trim_end(),
-        "Updated .agents/context/index.md"
-    );
+    assert!(!root.join(".agents/context/index.md").exists());
 }
 
 #[test]
@@ -1204,14 +1106,7 @@ fn bake_tasks_report_empty_context_and_skill_sets() {
             .trim_end(),
         "No dependency skills were installed"
     );
-    assert_eq!(
-        Registry::discover()
-            .unwrap()
-            .run_arguments(&root, &["agent:context:index".to_owned()])
-            .unwrap()
-            .trim_end(),
-        "Updated .agents/context/index.md"
-    );
+    assert!(!root.join(".agents/context/index.md").exists());
 }
 
 #[test]

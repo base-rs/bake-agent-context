@@ -1,5 +1,9 @@
 # Releases
 
+## Unreleased
+
+- Discover dependency guidance through installed Markdown files and the list/show commands. Remove generated indexes and the `agent:context:index` task.
+
 ## v0.3.3
 
 - Use Cargo-selected dependency versions and generated task links in setup instructions.

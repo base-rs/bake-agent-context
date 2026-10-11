@@ -3,13 +3,11 @@
 
 //! Bake tasks and APIs for consuming context directories shipped by Cargo packages.
 mod exclude;
-mod index;
 mod installer;
 mod skill;
 #[cfg(test)]
 mod test_filesystem;
 
-pub use index::ContextIndex;
 pub use installer::{ContextFile, ContextPackage, Installer};
 pub use skill::{Skill, install_skills, list_skills};
 
@@ -82,7 +80,7 @@ pub fn show(
     Ok(content)
 }
 
-/// Install context and skills from one crate or all dependencies, then update the context index.
+/// Install context and skills from one crate or all dependencies.
 #[bake::task(name = "agent:context:install")]
 pub fn install(context: &mut Context, package: Option<String>) -> Result<String> {
     let installer = installer(context)?;
@@ -96,10 +94,6 @@ pub fn install(context: &mut Context, package: Option<String>) -> Result<String>
         installer.install_all()?
     };
     let installed_skills = install_skills(&installer, package.as_deref(), None)?;
-
-    ContextIndex::new(context.root())
-        .with_packages(installer.packages())
-        .update_index()?;
 
     let mut output = Vec::new();
     if !installed_context.is_empty() {
@@ -154,16 +148,6 @@ pub fn skill_install(
     } else {
         Ok(format!("Installed skills: {}", installed.join(", ")))
     }
-}
-
-/// Create or update `.agents/context/index.md` from installed context files.
-#[bake::task(name = "agent:context:index")]
-pub fn index(context: &mut Context) -> Result<String> {
-    let installer = installer(context)?;
-    ContextIndex::new(context.root())
-        .with_packages(installer.packages())
-        .update_index()?;
-    Ok("Updated .agents/context/index.md".to_owned())
 }
 
 #[cfg(test)]
@@ -260,7 +244,7 @@ mod tests {
     }
 
     #[test]
-    fn task_wrappers_propagate_install_and_index_failures() {
+    fn task_wrappers_propagate_install_failures() {
         let directory = tempdir().unwrap();
         let root = directory.path();
         let provider = package(root, "provider", "1.0.0");
@@ -278,12 +262,6 @@ mod tests {
         let mut context = make_context(root, vec![provider.clone()]);
         assert!(install(&mut context, Some("provider".to_owned())).is_err());
         drop(_failure);
-
-        let index_file = root.join(".agents/context/index.md");
-        fs::create_dir_all(&index_file).unwrap();
-        let mut context = make_context(root, Vec::new());
-        assert!(install(&mut context, None).is_err());
-        assert!(index(&mut context).is_err());
 
         let mut empty = make_context(root, Vec::new());
         assert!(
@@ -310,6 +288,5 @@ mod tests {
         assert!(install(&mut context, None).is_err());
         assert!(skill_list(&mut context, None).is_err());
         assert!(skill_install(&mut context, None, None).is_err());
-        assert!(index(&mut context).is_err());
     }
 }

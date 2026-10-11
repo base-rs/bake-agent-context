@@ -147,14 +147,12 @@ mod tests {
                     "::".to_owned(),
                     "agent:context:skill:install".to_owned(),
                     "::".to_owned(),
-                    "agent:context:index".to_owned(),
-                    "::".to_owned(),
                     "agent:context:install".to_owned(),
                 ],
             )
             .unwrap();
         assert!(output.contains("No dependency context or skills were installed"));
-        assert!(root.join(".agents/context/index.md").is_file());
+        assert!(!root.join(".agents/context/index.md").exists());
         assert!(root.join(".agents/skills").is_dir());
 
         let registry = Registry::discover().unwrap();
@@ -242,16 +240,8 @@ mod tests {
                 .is_file()
         );
 
-        let output = Registry::discover()
-            .unwrap()
-            .run_arguments(root, &["agent:context:index".to_owned()])
-            .unwrap();
-        assert!(output.contains("Updated .agents/context/index.md"));
-        let index = fs::read_to_string(root.join(".agents/context/index.md")).unwrap();
-        assert!(index.contains("Fixture documentation provider"));
-        assert!(index.contains("A guide for the fixture."));
-        assert!(index.contains("[Guide](docs-provider/guide.md)"));
-        assert!(!index.contains("usage.md"));
+        assert!(!root.join(".agents/context/index.md").exists());
+        assert!(!root.join(".agents/context/docs-provider/usage.md").exists());
     }
 
     #[cfg(unix)]

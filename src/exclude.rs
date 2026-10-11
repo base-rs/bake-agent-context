@@ -420,7 +420,7 @@ mod tests {
         for (path, ignored) in [
             (".agents/skills/provider-old/SKILL.md", true),
             ("apps/worker/.agents/skills/provider-old/SKILL.md", true),
-            ("apps/web [dev]/.agents/context/index.md", true),
+            ("apps/web [dev]/.agents/context/provider/guide.md", true),
             ("apps/web [dev]/.agents/skills/provider-new/SKILL.md", true),
             ("apps/web [dev]/.agents/skills/provider-old/SKILL.md", false),
             (

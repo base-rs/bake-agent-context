@@ -446,20 +446,6 @@ fn staging_path(skills_root: &Path) -> PathBuf {
     ))
 }
 
-pub(crate) fn frontmatter_description(document: &Node, source: &Path) -> Result<Option<String>> {
-    let Some(frontmatter) = context_frontmatter(document, source)? else {
-        return Ok(None);
-    };
-    let Some(description) = frontmatter.description else {
-        return Ok(None);
-    };
-    let description = description.trim();
-    if description.is_empty() {
-        return Ok(None);
-    }
-    Ok(Some(description.to_owned()))
-}
-
 fn context_frontmatter(document: &Node, source: &Path) -> Result<Option<ContextFrontmatter>> {
     let children = document
         .children()
@@ -624,12 +610,6 @@ fn ensure_directory(path: &Path) -> Result<()> {
             path.display()
         ))),
     }
-}
-
-pub(crate) fn installed_skill_names(root: &Path) -> Result<Vec<String>> {
-    Ok(installed_skill_owners(&root.join(".agents/skills"))?
-        .into_keys()
-        .collect())
 }
 
 fn write_skill_owner(directory: &Path, owner: &SkillOwner) -> Result<()> {
@@ -1030,11 +1010,6 @@ mod tests {
                 .is_none()
         );
         assert!(
-            frontmatter_description(&no_frontmatter, Path::new("plain.md"))
-                .unwrap()
-                .is_none()
-        );
-        assert!(
             parse_skill_document(&package, Path::new("plain.md"), "# Plain\n")
                 .unwrap()
                 .is_none()
@@ -1052,27 +1027,6 @@ mod tests {
         ] {
             assert!(validate_skill_name(invalid).is_err(), "{invalid:?}");
         }
-    }
-
-    #[test]
-    fn normalizes_frontmatter_descriptions_and_omits_blank_descriptions() {
-        let mut options = ParseOptions::default();
-        options.constructs.frontmatter = true;
-        let document = to_mdast(
-            "---\ndescription: \"  A useful guide.  \"\n---\n\n# Guide\n",
-            &options,
-        )
-        .unwrap();
-        assert_eq!(
-            frontmatter_description(&document, Path::new("guide.md")).unwrap(),
-            Some("A useful guide.".to_owned())
-        );
-
-        let document = to_mdast("---\ndescription: \"   \"\n---\n\n# Guide\n", &options).unwrap();
-        assert_eq!(
-            frontmatter_description(&document, Path::new("guide.md")).unwrap(),
-            None
-        );
     }
 
     #[cfg(unix)]
@@ -1204,25 +1158,18 @@ mod tests {
         assert!(error.to_string().contains("injected filesystem failure"));
     }
 
-    #[cfg(unix)]
     #[test]
     fn reports_context_document_read_errors() {
-        use std::os::unix::fs::PermissionsExt;
-
         let directory = tempdir().unwrap();
         let package = package(directory.path(), "provider", "1.0.0");
         let document = package.context_path.join("unreadable.md");
         fs::write(&document, "---\ntype: skill\ndescription: Skill.\n---\n").unwrap();
-        let mut permissions = fs::metadata(&document).unwrap().permissions();
-        permissions.set_mode(0o0);
-        fs::set_permissions(&document, permissions).unwrap();
+        let _failure =
+            filesystem::fail_once(filesystem::Operation::Read, move |path| path == document);
 
         let error = list_package_skills(&package).unwrap_err();
         assert!(error.to_string().contains("cannot read"));
-
-        let mut permissions = fs::metadata(&document).unwrap().permissions();
-        permissions.set_mode(0o600);
-        fs::set_permissions(&document, permissions).unwrap();
+        assert!(error.to_string().contains("unreadable.md"));
     }
 
     #[cfg(unix)]
@@ -1326,7 +1273,11 @@ mod tests {
         let directory = tempdir().unwrap();
         let root = directory.path();
         assert!(load_skill_owner(root).unwrap().is_none());
-        assert!(installed_skill_names(root).unwrap().is_empty());
+        assert!(
+            installed_skill_owners(&root.join(".agents/skills"))
+                .unwrap()
+                .is_empty()
+        );
         let marker = root.join(OWNERSHIP_FILE);
         fs::create_dir(&marker).unwrap();
         assert!(
@@ -1429,7 +1380,11 @@ mod tests {
         let empty = make_installer(root, Vec::new());
         assert!(install_skills(&empty, None, None).unwrap().is_empty());
         assert!(install_skills(&empty, None, None).unwrap().is_empty());
-        assert!(installed_skill_names(root).unwrap().is_empty());
+        assert!(
+            installed_skill_owners(&root.join(".agents/skills"))
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -2019,7 +1974,13 @@ mod tests {
         let installer = make_installer(root, vec![provider]);
         install_skills(&installer, None, None).unwrap();
         install_skills(&make_installer(root, Vec::new()), None, None).unwrap();
-        assert_eq!(installed_skill_names(root).unwrap(), ["gem-workflow"]);
+        assert_eq!(
+            installed_skill_owners(&root.join(".agents/skills"))
+                .unwrap()
+                .into_keys()
+                .collect::<Vec<_>>(),
+            ["gem-workflow"]
+        );
         assert_eq!(fs::read(foreign.join(OWNERSHIP_FILE)).unwrap(), before);
         assert_eq!(
             fs::read_to_string(foreign.join("SKILL.md")).unwrap(),
@@ -2091,10 +2052,16 @@ mod tests {
             "provider",
             "1.0.0",
         );
-        assert_eq!(installed_skill_names(root).unwrap(), ["provider-workflow"]);
+        assert_eq!(
+            installed_skill_owners(&skills)
+                .unwrap()
+                .into_keys()
+                .collect::<Vec<_>>(),
+            ["provider-workflow"]
+        );
         for name in ["Bad_Name".to_owned(), "a".repeat(65)] {
             seed_owner(&skills.join(&name), "cargo", "provider", "1.0.0");
-            assert!(installed_skill_names(root).is_err());
+            assert!(installed_skill_owners(&skills).is_err());
             fs::remove_dir_all(skills.join(name)).unwrap();
         }
         let file_root = root.join("file-root");
@@ -2105,7 +2072,7 @@ mod tests {
             path == failure_path
         });
         assert!(
-            installed_skill_names(root)
+            installed_skill_owners(&skills)
                 .unwrap_err()
                 .to_string()
                 .contains("cannot inspect")
@@ -2115,7 +2082,7 @@ mod tests {
             path == failure_path
         });
         assert!(
-            installed_skill_names(root)
+            installed_skill_owners(&skills)
                 .unwrap_err()
                 .to_string()
                 .contains("cannot read")
@@ -2125,12 +2092,12 @@ mod tests {
             filesystem::fail_once(filesystem::Operation::ReadDirectoryEntry, move |path| {
                 path == failure_path
             });
-        assert!(installed_skill_names(root).is_err());
+        assert!(installed_skill_owners(&skills).is_err());
         let failure_path = skills.join("project-owned");
         let _failure = filesystem::fail_once(filesystem::Operation::FileType, move |path| {
             path == failure_path
         });
-        assert!(installed_skill_names(root).is_err());
+        assert!(installed_skill_owners(&skills).is_err());
     }
 
     #[cfg(unix)]
@@ -2143,7 +2110,10 @@ mod tests {
         seed_owner(&provider, "cargo", "provider", "1.0.0");
         symlink(&provider, skills.join("linked-skill")).unwrap();
         assert_eq!(
-            installed_skill_names(directory.path()).unwrap(),
+            installed_skill_owners(&skills)
+                .unwrap()
+                .into_keys()
+                .collect::<Vec<_>>(),
             ["provider-workflow"]
         );
         let linked_root = directory.path().join("linked-root");
@@ -2151,7 +2121,7 @@ mod tests {
         assert!(installed_skill_owners(&linked_root).is_err());
         fs::remove_file(provider.join(OWNERSHIP_FILE)).unwrap();
         symlink("missing.json", provider.join(OWNERSHIP_FILE)).unwrap();
-        assert!(installed_skill_names(directory.path()).is_err());
+        assert!(installed_skill_owners(&skills).is_err());
     }
 
     #[test]

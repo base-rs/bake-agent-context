@@ -23,7 +23,7 @@ Run this from the project root:
 cargo bake agent:context:install
 ```
 
-The task scans resolved Cargo dependencies for a top-level `context/` directory, copies ordinary context files into `.agents/context/`, installs skill-marked documents and their resources into `.agents/skills/`, and writes `.agents/context/index.md`. Skill-marked documents are not copied into the context directory or listed in its index. The task does not create or modify `agents.md`, which remains under the repository owner's control.
+The task scans resolved Cargo dependencies for a top-level `context/` directory, copies ordinary context files into `.agents/context/SELECTOR/`, and installs skill-marked documents and their resources into `.agents/skills/`. Discover installed guidance by listing Markdown files under the provider's context directory and reading the guides relevant to the task.
 
 Use `cargo bake agent:context:list` to see which dependencies provide ordinary context. Install context and skills from one provider with `cargo bake agent:context:install --package CRATE`, or inspect one of its context files with `cargo bake agent:context:show --package CRATE --file getting-started`.
 
@@ -31,6 +31,6 @@ List skills provided by dependencies with `cargo bake agent:context:skill:list`.
 
 ## Generated files
 
-The install task maintains a marked block in the repository's local Git exclude file (`.git/info/exclude`) for generated `.agents/context/` files and dependency-installed skill directories. These local exclusions are not committed. Project-owned skill directories remain trackable. If the project wants a top-level agent entrypoint, its owner can add a stable link to `.agents/context/index.md` in `agents.md`.
+The install task maintains a marked block in the repository's local Git exclude file (`.git/info/exclude`) for installed context and dependency skills. Project-owned skill directories remain trackable. Repository instructions can direct agents to read relevant Markdown files under `.agents/context/`.
 
 Each installed skill directory contains `skill.json` with its provider ecosystem, package, and version. Cargo refreshes reconcile Cargo-owned skills and reject conflicting ownership. See the portable specification for the shared format.
