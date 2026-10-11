@@ -417,6 +417,28 @@ fn installs_context_and_skills_without_changing_agents_file() {
 }
 
 #[test]
+fn copies_ordinary_document_metadata_without_interpreting_descriptions() {
+    let (_directory, root) = project();
+    let provider = root.parent().unwrap().join("provider");
+    let guide = "---\ndescription: {text: Provider metadata.}\n---\n\n# Guide\n";
+    write(&provider, "context/guide.md", guide);
+    let installer = Installer::discover(&root).unwrap();
+
+    assert_eq!(
+        installer
+            .show_context_file("docs-provider", "guide")
+            .unwrap()
+            .as_deref(),
+        Some(guide)
+    );
+    installer.install_all().unwrap();
+    assert_eq!(
+        fs::read_to_string(root.join(".agents/context/docs-provider/guide.md")).unwrap(),
+        guide
+    );
+}
+
+#[test]
 fn context_only_installation_updates_git_exclusions() {
     let (_directory, root) = project();
     let provider = root.parent().unwrap().join("provider/context");

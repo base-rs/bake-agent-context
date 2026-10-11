@@ -41,7 +41,7 @@ impl Skill {
 struct ContextFrontmatter {
     #[serde(rename = "type")]
     document_type: Option<String>,
-    description: Option<String>,
+    description: Option<serde_yaml_ng::Value>,
     #[serde(flatten)]
     metadata: BTreeMap<String, serde_yaml_ng::Value>,
 }
@@ -164,6 +164,8 @@ fn parse_skill_document(
 
     let description = frontmatter
         .description
+        .as_ref()
+        .and_then(serde_yaml_ng::Value::as_str)
         .map(|description| description.trim().to_owned())
         .filter(|description| !description.is_empty())
         .ok_or_else(|| {
@@ -894,6 +896,14 @@ mod tests {
                 "provider",
                 "blank-description.md",
                 "---\ntype: skill\ndescription: '  '\n---\n\n# Skill\n"
+            )
+            .contains("requires a non-empty")
+        );
+        assert!(
+            error_for_document(
+                "provider",
+                "structured-description.md",
+                "---\ntype: skill\ndescription: {text: Skill.}\n---\n\n# Skill\n"
             )
             .contains("requires a non-empty")
         );
