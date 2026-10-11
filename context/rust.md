@@ -10,7 +10,7 @@ Keep protocol representation and parsing separate from transport and task schedu
 
 Record the exact upstream revision and relevant files for a port. Preserve license notices and contributor attribution. Explain intentional semantic differences, especially ownership, cancellation, error handling, and time.
 
-Follow the Socketry Rust Conventions guide from `socketry-project` for construction, responsibility boundaries, readable control flow, and alignment across implementations. Keep the mapping of corresponding components and proposed changes in the package's design guide.
+Follow the Conventions guide from `socketry-project` for construction, responsibility boundaries, readable control flow, and alignment across implementations. Keep the mapping of corresponding components and proposed changes in the package's design guide.
 
 ## Futures and executors
 
