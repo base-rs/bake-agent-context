@@ -94,6 +94,8 @@ See [releases.md](releases.md) for the full release history.
 
 Please open an issue or pull request on [GitHub](https://github.com/socketry/bake-agent-context-rust).
 
+Read the [architecture design](context/design.md) for the current Ruby and Rust boundaries and the proposed alignment work.
+
 ### Agent Context
 
 Run `cargo bake agent:context:install` to install shared context and skills. Read `.agents/context/index.md` to find relevant guides, follow `agents.md` if present, and apply skills under `.agents/skills/`. The installer preserves repository-owned `agents.md`; it does not create or regenerate that file.
