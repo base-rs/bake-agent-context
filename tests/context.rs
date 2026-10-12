@@ -863,14 +863,14 @@ fn reports_public_installer_and_cargo_metadata_errors() {
     let (_directory, root) = project();
     let installer = Installer::discover(&root).unwrap();
     fs::create_dir_all(root.join(".agents")).unwrap();
-    fs::write(root.join(".agents/context"), "not a directory").unwrap();
-    assert!(
-        installer
-            .install_package("docs-provider")
-            .unwrap_err()
-            .to_string()
-            .contains("cannot inspect")
-    );
+    let blocked = root.join(".agents/context");
+    fs::write(&blocked, "not a directory").unwrap();
+    let error = installer
+        .install_package("docs-provider")
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains(&blocked.display().to_string()), "{error}");
+    assert_eq!(fs::read_to_string(blocked).unwrap(), "not a directory");
 
     let directory = tempfile::tempdir().unwrap();
     write(
