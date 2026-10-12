@@ -172,6 +172,8 @@ fn lists_context_definitions_with_skill_markers() {
             "reference/usage.md"
         ]
     );
+    assert!(definitions.iter().any(Definition::is_skill));
+    assert!(definitions.iter().any(|definition| !definition.is_skill()));
 }
 
 #[test]

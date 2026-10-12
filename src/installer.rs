@@ -63,7 +63,10 @@ impl Definition {
     /// The name shown by `agent:context:list`.
     pub fn display_name(&self) -> String {
         match self {
-            Self::File(file) => file.path.display().to_string(),
+            Self::File(file) => file
+                .path
+                .to_string_lossy()
+                .replace(std::path::MAIN_SEPARATOR, "/"),
             Self::Skill(skill) => format!("{} (skill)", skill.source_name),
         }
     }
@@ -80,12 +83,7 @@ impl ContextFile {
             return Ok(document.content.clone());
         }
 
-        read_context_file(&self.source)?.ok_or_else(|| {
-            Error::new(format!(
-                "context file {} was not found",
-                self.source.display()
-            ))
-        })
+        read_context_file(&self.source)
     }
 }
 
@@ -452,9 +450,8 @@ fn canonical_context_root(context_path: &Path) -> Result<PathBuf> {
     })
 }
 
-fn read_context_file(path: &Path) -> Result<Option<String>> {
+fn read_context_file(path: &Path) -> Result<String> {
     fs::read_to_string(path)
-        .map(Some)
         .map_err(|error| Error::new(format!("cannot read {}: {error}", path.display())))
 }
 

@@ -193,6 +193,10 @@ mod tests {
         let empty_package = package(root, "empty", "1.0.0");
         fs::create_dir_all(&empty_package.context_path).unwrap();
         let mut empty_context = make_context(root, vec![empty_package]);
+        assert_eq!(
+            list(&mut empty_context, Some("empty".to_owned())).unwrap(),
+            "No context definitions found for crate 'empty@1.0.0'."
+        );
         assert!(
             list(&mut empty_context, None)
                 .unwrap()

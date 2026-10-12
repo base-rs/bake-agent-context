@@ -411,11 +411,17 @@ mod tests {
         let first = provider(root, "a_provider", "1.0.0");
         let second = provider(root, "a_provider", "2.0.0");
         let last = provider(root, "z-provider", "1.0.0");
+        fs::write(first.context_path.join("guide.md"), "# Guide\n").unwrap();
         for package in [&last, &second, &first] {
             write_skill(package, "zeta", "description: Zeta.\n", "Z");
             write_skill(package, "alpha", "description: Alpha.\n", "A");
         }
         let installer = Installer::for_test(root, vec![last, second, first]);
+        assert!(
+            list_skills(&installer, Some("missing-provider"))
+                .unwrap()
+                .is_empty()
+        );
         let skills = list_skills(&installer, None).unwrap();
         assert_eq!(skills[0].name, "a-provider-alpha");
         assert_eq!(skills[0].package.version, "1.0.0");
