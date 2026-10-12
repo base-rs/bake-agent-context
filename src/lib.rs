@@ -2,13 +2,16 @@
 // Copyright, 2026, by Samuel Williams.
 
 //! Bake tasks and APIs for consuming context directories shipped by Cargo packages.
+mod document;
 mod exclude;
 mod installer;
+mod ownership;
+mod package_context;
 mod skill;
 #[cfg(test)]
 mod test_filesystem;
 
-pub use installer::{ContextFile, ContextPackage, Installer};
+pub use installer::{ContextFile, ContextPackage, Installation, Installer};
 pub use skill::{Skill, install_skills, list_skills};
 
 use bake::{Context, Error, Result};
@@ -84,16 +87,9 @@ pub fn show(
 #[bake::task(name = "agent:context:install")]
 pub fn install(context: &mut Context, package: Option<String>) -> Result<String> {
     let installer = installer(context)?;
-    let installed_context = if let Some(package) = package.as_deref() {
-        if installer.install_package(package)? {
-            vec![package.to_owned()]
-        } else {
-            Vec::new()
-        }
-    } else {
-        installer.install_all()?
-    };
-    let installed_skills = install_skills(&installer, package.as_deref(), None)?;
+    let installed = installer.install(package.as_deref())?;
+    let installed_context = installed.context;
+    let installed_skills = installed.skills;
 
     let mut output = Vec::new();
     if !installed_context.is_empty() {
@@ -134,7 +130,7 @@ pub fn skill_list(context: &mut Context, package: Option<String>) -> Result<Stri
     Ok(output)
 }
 
-/// Install skills from all dependencies or select a crate and/or package-prefixed skill name.
+/// Install skills from all dependencies or select a crate and/or installed skill name.
 #[bake::task(name = "agent:context:skill:install")]
 pub fn skill_install(
     context: &mut Context,
@@ -180,7 +176,7 @@ mod tests {
         write(&guide.context_path.join("guide.md"), "# Guide\n");
         write(
             &guide.context_path.join("broken.md"),
-            "---\ntype: guide\n---\n# Unsupported\n",
+            "---\nmetadata:\n  type: guide\n---\n# Unsupported\n",
         );
         let mut context = make_context(root, vec![guide.clone()]);
 
@@ -250,10 +246,10 @@ mod tests {
         let provider = package(root, "provider", "1.0.0");
         write(&provider.context_path.join("guide.md"), "# Guide\n");
 
-        let ownership = root.join(".agents/skills/provider-workflow/skill.json");
+        let ownership = root.join(".agents/skills/provider-workflow/SKILL.md");
         write(
             &ownership,
-            r#"{"ecosystem":"cargo","package":"provider","version":"1.0.0"}"#,
+            "---\nmetadata:\n  type: skill\n  ecosystem: cargo\n  package: provider\n  version: 1.0.0\n---\n",
         );
         let failure_path = ownership.clone();
         let _failure = test_filesystem::fail_once(test_filesystem::Operation::Read, move |path| {

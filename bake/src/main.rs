@@ -79,12 +79,12 @@ mod tests {
         .unwrap();
         fs::write(
             root.join("provider/context/usage.md"),
-            "---\ntype: skill\ndescription: Use the fixture provider.\n---\n\n# Usage\n\nFollow the provider instructions.\n",
+            "---\nmetadata:\n  type: skill\ndescription: Use the fixture provider.\n---\n\n# Usage\n\nFollow the provider instructions.\n",
         )
         .unwrap();
         fs::write(
             root.join("provider/context/workflow.md"),
-            "---\ntype: skill\ndescription: Follow the fixture workflow.\n---\n\n# Workflow\n\nUse this workflow.\n",
+            "---\nmetadata:\n  type: skill\ndescription: Follow the fixture workflow.\n---\n\n# Workflow\n\nUse this workflow.\n",
         )
         .unwrap();
         fs::write(
@@ -249,11 +249,11 @@ mod tests {
     fn reports_skill_ownership_read_and_directory_creation_errors() {
         let project = temporary_project_with_context_provider();
         let root = project.path();
-        let ownership_path = root.join(".agents/skills/docs-provider-workflow/skill.json");
+        let ownership_path = root.join(".agents/skills/docs-provider-workflow/SKILL.md");
         fs::create_dir_all(ownership_path.parent().unwrap()).unwrap();
         fs::write(
             &ownership_path,
-            r#"{"ecosystem":"cargo","package":"docs-provider","version":"1.0.0"}"#,
+            "---\nmetadata:\n  type: skill\n  ecosystem: cargo\n  package: docs-provider\n  version: 1.0.0\n---\n",
         )
         .unwrap();
         fs::set_permissions(&ownership_path, fs::Permissions::from_mode(0o000)).unwrap();

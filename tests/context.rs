@@ -53,7 +53,7 @@ fn project() -> (TempDir, std::path::PathBuf) {
     write(
         &provider,
         "context/initial-gem-setup.md",
-        "---\ntype: skill\ndescription: Set up a new Ruby gem using the project conventions.\n---\n\n# Initial Gem Setup\n\nCreate the gem files and verify the package.\n",
+        "---\nmetadata:\n  type: skill\ndescription: Set up a new Ruby gem using the project conventions.\n---\n\n# Initial Gem Setup\n\nCreate the gem files and verify the package.\n",
     );
     write(
         &provider,
@@ -177,9 +177,11 @@ fn discovers_and_installs_skills_declared_in_yaml_frontmatter() {
 
     let skill_directory = root.join(".agents/skills").join(INSTALLED_SKILL_NAME);
     let skill_markdown = fs::read_to_string(skill_directory.join("SKILL.md")).unwrap();
-    assert!(skill_markdown.starts_with(&format!(
-        "---\nname: {INSTALLED_SKILL_NAME}\ndescription: Set up a new Ruby gem using the project conventions.\n---\n\n"
-    )));
+    assert!(skill_markdown.contains(&format!("name: {INSTALLED_SKILL_NAME}")));
+    assert!(skill_markdown.contains("  ecosystem: cargo"));
+    assert!(skill_markdown.contains("  package: docs-provider"));
+    assert!(skill_markdown.contains("  version: 1.2.3"));
+    assert!(!skill_directory.join("skill.json").exists());
     assert!(skill_markdown.contains("# Initial Gem Setup"));
     assert_eq!(
         fs::read_to_string(skill_directory.join("references/checklist.md")).unwrap(),
@@ -231,7 +233,7 @@ fn names_the_usage_skill_from_its_file_and_package() {
     write(
         &provider,
         "context/usage.md",
-        "---\ntype: skill\ndescription: Use this skill to install and navigate dependency context.\n---\n\n# Usage\n\nInstall context and read the relevant Markdown guides.\n",
+        "---\nmetadata:\n  type: skill\ndescription: Use this skill to install and navigate dependency context.\n---\n\n# Usage\n\nInstall context and read the relevant Markdown guides.\n",
     );
 
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
@@ -274,7 +276,7 @@ fn skill_installation_does_not_overwrite_project_owned_skills() {
     assert!(
         error
             .to_string()
-            .contains("not managed by Bake Agent Context")
+            .contains("belongs to a project or another provider")
     );
     assert_eq!(
         fs::read_to_string(
@@ -515,7 +517,7 @@ fn discovers_multiple_context_providers_and_orders_their_skills() {
     write(
         &second_provider,
         "context/release.md",
-        "---\ntype: skill\ndescription: Prepare a release.\n---\n\n# Release\n\nReview the release notes first.\n",
+        "---\nmetadata:\n  type: skill\ndescription: Prepare a release.\n---\n\n# Release\n\nReview the release notes first.\n",
     );
     write(
         &root,
@@ -574,7 +576,7 @@ fn sorts_skills_within_a_provider_by_name() {
     write(
         &provider,
         "context/another-skill.md",
-        "---\ntype: skill\ndescription: A second test skill.\n---\n\n# Another Skill\n",
+        "---\nmetadata:\n  type: skill\ndescription: A second test skill.\n---\n\n# Another Skill\n",
     );
 
     let installer = Installer::discover(&root).unwrap();
@@ -596,7 +598,7 @@ fn selecting_one_skill_keeps_other_installed_skills() {
     write(
         &provider,
         "context/secondary.md",
-        "---\ntype: skill\ndescription: A secondary skill.\n---\n\n# Secondary\n",
+        "---\nmetadata:\n  type: skill\ndescription: A secondary skill.\n---\n\n# Secondary\n",
     );
     let installer = Installer::discover(&root).unwrap();
 
@@ -619,7 +621,7 @@ fn selecting_one_skill_keeps_other_installed_skills() {
 
     let skills_root = root.join(".agents/skills");
     assert!(skills_root.join("docs-provider-secondary").is_dir());
-    let owner = fs::read_to_string(skills_root.join("docs-provider-secondary/skill.json")).unwrap();
+    let owner = fs::read_to_string(skills_root.join("docs-provider-secondary/SKILL.md")).unwrap();
     assert!(owner.contains("docs-provider"));
 }
 
@@ -627,11 +629,11 @@ fn selecting_one_skill_keeps_other_installed_skills() {
 #[test]
 fn reports_ownership_read_and_skill_directory_creation_errors() {
     let (_directory, root) = project();
-    let ownership_path = root.join(".agents/skills/provider-workflow/skill.json");
+    let ownership_path = root.join(".agents/skills/provider-workflow/SKILL.md");
     write(
         &root,
-        ".agents/skills/provider-workflow/skill.json",
-        r#"{"ecosystem":"cargo","package":"provider","version":"1"}"#,
+        ".agents/skills/provider-workflow/SKILL.md",
+        "---\nmetadata:\n  type: skill\n  ecosystem: cargo\n  package: provider\n  version: '1'\n---\n",
     );
     fs::set_permissions(&ownership_path, fs::Permissions::from_mode(0o000)).unwrap();
     let installer = Installer::discover(&root).unwrap();
@@ -700,7 +702,7 @@ fn validates_skill_documents_through_the_dependency_build() {
     write(
         &provider,
         "another-skill.md",
-        "---\ntype: skill\ndescription: Another skill.\n---\n\n# Another Skill\n",
+        "---\nmetadata:\n  type: skill\ndescription: Another skill.\n---\n\n# Another Skill\n",
     );
     assert_eq!(
         list_skills(&installer, Some("docs-provider"))
@@ -712,7 +714,7 @@ fn validates_skill_documents_through_the_dependency_build() {
     for (name, contents, message) in [
         (
             "unsupported.md",
-            "---\ntype: guide\ndescription: Guide.\n---\n\n# Guide\n",
+            "---\nmetadata:\n  type: guide\ndescription: Guide.\n---\n\n# Guide\n",
             "unsupported context type",
         ),
         (
@@ -722,21 +724,21 @@ fn validates_skill_documents_through_the_dependency_build() {
         ),
         (
             "Bad_Name.md",
-            "---\ntype: skill\ndescription: Invalid name.\n---\n\n# Skill\n",
+            "---\nmetadata:\n  type: skill\ndescription: Invalid name.\n---\n\n# Skill\n",
             "invalid skill name",
         ),
         (
             "missing-description.md",
-            "---\ntype: skill\n---\n\n# Skill\n",
-            "requires a non-empty",
+            "---\nmetadata:\n  type: skill\n---\n\n# Skill\n",
+            "requires a description",
         ),
         (
             "long-description.md",
             &format!(
-                "---\ntype: skill\ndescription: {}\n---\n\n# Skill\n",
+                "---\nmetadata:\n  type: skill\ndescription: {}\n---\n\n# Skill\n",
                 "x".repeat(1025)
             ),
-            "1024 character limit",
+            "1024 characters",
         ),
     ] {
         write(&provider, name, contents);
@@ -760,7 +762,7 @@ fn validates_skill_documents_through_the_dependency_build() {
     write(
         &provider,
         "nested/skill.md",
-        "---\ntype: skill\ndescription: Nested.\n---\n\n# Skill\n",
+        "---\nmetadata:\n  type: skill\ndescription: Nested.\n---\n\n# Skill\n",
     );
     assert!(
         list_skills(&installer, None)
@@ -779,7 +781,7 @@ fn validates_skill_documents_through_the_dependency_build() {
     write(
         &provider,
         "blocked.md",
-        "---\ntype: skill\ndescription: Blocked.\n---\n\n# Blocked\n",
+        "---\nmetadata:\n  type: skill\ndescription: Blocked.\n---\n\n# Blocked\n",
     );
     write(&provider, "blocked", "not a directory");
     assert!(
@@ -840,20 +842,20 @@ fn rejects_non_regular_skill_assets_in_the_dependency_build() {
 }
 
 #[test]
-fn adds_a_final_newline_to_parsed_skill_documents() {
+fn preserves_the_original_body_without_a_final_newline() {
     let (_directory, root) = project();
     let provider = root.parent().unwrap().join("provider");
     write(
         &provider,
         "context/no-final-newline.md",
-        "---\ntype: skill\ndescription: A skill without a final newline.\n---\n\n# No Final Newline",
+        "---\nmetadata:\n  type: skill\ndescription: A skill without a final newline.\n---\n\n# No Final Newline",
     );
 
     install_skills(&Installer::discover(&root).unwrap(), None, None).unwrap();
     let installed =
         fs::read_to_string(root.join(".agents/skills/docs-provider-no-final-newline/SKILL.md"))
             .unwrap();
-    assert!(installed.ends_with('\n'));
+    assert!(installed.ends_with("# No Final Newline"));
 }
 
 #[test]
@@ -867,7 +869,7 @@ fn reports_public_installer_and_cargo_metadata_errors() {
             .install_package("docs-provider")
             .unwrap_err()
             .to_string()
-            .contains("cannot create")
+            .contains("cannot inspect")
     );
 
     let directory = tempfile::tempdir().unwrap();
@@ -896,29 +898,29 @@ fn rejects_invalid_skill_ownership_and_installation_paths() {
 
     let (_directory, root) = project();
     let installer = Installer::discover(&root).unwrap();
-    let ownership_path = root.join(".agents/skills/provider-workflow/skill.json");
+    let ownership_path = root.join(".agents/skills/provider-workflow/SKILL.md");
     write(
         &root,
-        ".agents/skills/provider-workflow/skill.json",
-        "{invalid json}",
+        ".agents/skills/provider-workflow/SKILL.md",
+        "---\nmetadata: [invalid\n---\n",
     );
     assert!(
         install_skills(&installer, None, None)
             .unwrap_err()
             .to_string()
-            .contains("invalid skill ownership")
+            .contains("invalid YAML front matter")
     );
 
     fs::write(
         &ownership_path,
-        r#"{"ecosystem":"cargo","package":" ","version":"1"}"#,
+        "---\nmetadata:\n  type: skill\n  ecosystem: cargo\n  package: ' '\n  version: '1'\n---\n",
     )
     .unwrap();
     assert!(
         install_skills(&installer, None, None)
             .unwrap_err()
             .to_string()
-            .contains("invalid owner")
+            .contains("invalid skill ownership")
     );
 }
 

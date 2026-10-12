@@ -32,7 +32,7 @@ cargo bake agent:context:skill:install --package socketry-executor --skill socke
 
 `cargo bake agent:context:install` copies ordinary guidance to `.agents/context/SELECTOR/` and maintains local Git exclusions for installed context and dependency skills. Browse the installed Markdown files or use the list/show commands to find relevant guides. Project-owned skills can be tracked under `.agents/skills/`.
 
-Context documents marked with `type: skill` are installed only under `.agents/skills/`, along with their companion resources. Their installed names are prefixed with the provider crate name, and they are omitted from `.agents/context/`. Use `agent:context:install --package CRATE` to install both context and skills from one provider. The separate skill tasks are useful for listing skills or installing a selected skill. Project-owned skills can live in `.agents/skills/` and remain version controlled.
+Context documents marked with `metadata.type: skill` are installed only under `.agents/skills/`, along with their companion resources. Their installed names use the authored `name`, or default to `<crate>-<filename>`, and they are omitted from `.agents/context/`. Use `agent:context:install --package CRATE` to install both context and skills from one provider. The separate skill tasks are useful for listing skills or installing a selected skill. Project-owned skills can live in `.agents/skills/` and remain version controlled.
 
 ## Provide context from a crate
 
@@ -99,4 +99,4 @@ Read the [architecture design](context/design.md) for the current Ruby and Rust 
 
 Run `cargo bake agent:context:install` to install shared context and skills. Follow the repository's agent instructions, discover relevant Markdown guides under `.agents/context/`, and apply matching skills under `.agents/skills/`.
 
-Each installed skill directory contains `skill.json` with its provider ecosystem, package, and version. Cargo refreshes reconcile Cargo-owned skills and reject conflicting ownership. See the portable specification for the shared format.
+Installed `SKILL.md` front matter records `metadata.type: skill` and the resolved `metadata.ecosystem`, `metadata.package`, and `metadata.version`. Cargo refreshes reconcile skills within their selected ecosystem and package scope. A full refresh also removes skills from removed or empty providers. After resolving an installation error, rerun the command to refresh generated files.

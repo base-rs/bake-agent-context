@@ -27,10 +27,10 @@ The task scans resolved Cargo dependencies for a top-level `context/` directory,
 
 Use `cargo bake agent:context:list` to see which dependencies provide ordinary context. Install context and skills from one provider with `cargo bake agent:context:install --package CRATE`, or inspect one of its context files with `cargo bake agent:context:show --package CRATE --file getting-started`.
 
-List skills provided by dependencies with `cargo bake agent:context:skill:list`. The main install task installs all of them; use `cargo bake agent:context:skill:install --package CRATE --skill CRATE-SKILL` to install a specific skill independently. The skill name is prefixed with the provider crate name.
+List skills provided by dependencies with `cargo bake agent:context:skill:list`. The main install task installs all of them; use `cargo bake agent:context:skill:install --package CRATE --skill CRATE-SKILL` to install a specific skill independently. The skill name uses the authored `name`, or defaults to `<crate>-<filename>`.
 
 ## Generated files
 
 The install task maintains a marked block in the repository's local Git exclude file (`.git/info/exclude`) for installed context and dependency skills. Project-owned skill directories remain trackable. Repository instructions can direct agents to read relevant Markdown files under `.agents/context/`.
 
-Each installed skill directory contains `skill.json` with its provider ecosystem, package, and version. Cargo refreshes reconcile Cargo-owned skills and reject conflicting ownership. See the portable specification for the shared format.
+Installed `SKILL.md` front matter records `metadata.type: skill` and the resolved `metadata.ecosystem`, `metadata.package`, and `metadata.version`. Cargo refreshes reconcile skills within their selected ecosystem and package scope. A full refresh also removes skills from removed or empty providers. After resolving an installation error, rerun the command to refresh generated files.

@@ -35,10 +35,6 @@ impl Update {
         fs::write(&self.path, &self.updated)
             .map_err(|error| Error::new(format!("cannot update {}: {error}", self.path.display())))
     }
-    pub(crate) fn restore(&self) -> Result<()> {
-        fs::write(&self.path, &self.original)
-            .map_err(|error| Error::new(format!("cannot restore {}: {error}", self.path.display())))
-    }
 }
 
 /// Prepare local Git excludes for generated context and installed skills.
@@ -278,25 +274,6 @@ mod tests {
         .apply()
         .unwrap_err();
         assert!(error.to_string().contains("cannot update"));
-    }
-
-    #[test]
-    fn restores_previous_exclusions_and_reports_restore_errors() {
-        let directory = tempdir().unwrap();
-        let path = directory.path().join("exclude");
-        fs::write(&path, "user rule\n").unwrap();
-        let update = prepare_local_exclude(path.clone(), "", &BTreeSet::new()).unwrap();
-        update.apply().unwrap();
-        update.restore().unwrap();
-        assert_eq!(fs::read_to_string(&path).unwrap(), "user rule\n");
-        let _failure = fs::fail_once(fs::Operation::Write, move |candidate| candidate == path);
-        assert!(
-            update
-                .restore()
-                .unwrap_err()
-                .to_string()
-                .contains("cannot restore")
-        );
     }
 
     #[test]

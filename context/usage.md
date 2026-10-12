@@ -1,5 +1,6 @@
 ---
-type: skill
+metadata:
+  type: skill
 description: Use this skill to install and navigate agent context and skills provided by Cargo dependencies.
 ---
 
@@ -39,7 +40,7 @@ Write focused, actionable guides with descriptive filenames, a clear heading, an
 
 ## Provide a skill from context
 
-A context document can also be distributed as an Agent Skill. Put the Markdown document directly in `context/` and give it YAML front matter with `type: skill` and a description that says what the skill does and when to use it:
+A context document can also be distributed as an Agent Skill. Put the Markdown document directly in `context/` and give it YAML front matter with `metadata.type: skill` and a description that says what the skill does and when to use it:
 
 ```text
 my-crate/
@@ -53,7 +54,8 @@ my-crate/
 
 ```markdown
 ---
-type: skill
+metadata:
+  type: skill
 description: Set up a new Ruby gem using the project conventions.
 ---
 
@@ -62,16 +64,16 @@ description: Set up a new Ruby gem using the project conventions.
 Follow the setup steps and use the bundled references when needed.
 ```
 
-The Markdown filename supplies the local skill name. Bake prefixes it with the Cargo package name, so `initial-gem-setup.md` in `my-crate` becomes `my-crate-initial-gem-setup/SKILL.md`. Files under the matching `context/initial-gem-setup/` directory are copied alongside it as skill resources. Bake generates the required YAML `name` and `description` fields in `SKILL.md`. Skill documents and their resource directories are installed only under `.agents/skills/`; they are omitted from `.agents/context/`. In this crate, `context/usage.md` is installed as `bake-agent-context-usage/SKILL.md`.
+Bake preserves an authored `name` and uses it for the installed directory. When `name` is absent, Bake derives it from the Cargo package and source filename: `initial-gem-setup.md` in `my-crate` becomes `my-crate-initial-gem-setup/SKILL.md`. Files under the matching `context/initial-gem-setup/` directory are copied alongside it as skill resources. The installer retains the authored description, additional metadata, and original Markdown body, and adds resolved provenance under `metadata`. Skill documents and their resources install under `.agents/skills/`. In this crate, `context/usage.md` defaults to `bake-agent-context-usage/SKILL.md`.
 
-The required skill front matter fields are `type: skill` and a non-empty `description`. Other types are rejected; additional metadata is preserved in the generated skill. Skill resources are copied without parsing their Markdown front matter. There is no portable file-pattern field for skills, so describe the relevant tasks and files in `description`.
+The required skill front matter fields are `metadata.type: skill` and a non-empty `description`. Other types are rejected; additional metadata is preserved in the generated skill. Skill resources are copied without parsing their Markdown front matter. There is no portable file-pattern field for skills, so describe the relevant tasks and files in `description`.
 
-Run `cargo bake agent:context:install` to install ordinary context and all discovered skills. Use `--package CRATE` to install both from one provider. For independent skill management, `cargo bake agent:context:skill:install` installs all skills by default; `--package CRATE` selects one provider, `--skill NAME` selects one uniquely named skill using its package-prefixed name, and both select a skill from a specific crate. Run `cargo bake agent:context:skill:list` to discover available skills.
+Run `cargo bake agent:context:install` to install ordinary context and all discovered skills. Use `--package CRATE` to install both from one provider. For independent skill management, `cargo bake agent:context:skill:install` installs all skills by default; `--package CRATE` selects one provider, `--skill NAME` selects one uniquely named skill using its installed name, and both select a skill from a specific crate. Run `cargo bake agent:context:skill:list` to discover available skills.
 
-Installed skills live under `.agents/skills/`. Bake records ownership there so it can update dependency-provided skills without overwriting project-owned skills. The installer adds exact entries to `.git/info/exclude` for dependency-owned skill directories; it does not ignore the whole `.agents/skills/` directory. Skill names are global within that directory and are prefixed by the Cargo package name. If multiple versions of one crate provide the same skill, select one provider explicitly. Top-level `SKILL.md` and `skill.json` are reserved for generated instructions and ownership.
+Installed skills live under `.agents/skills/`. Bake records ownership there so it can update dependency-provided skills without overwriting project-owned skills. The installer adds exact entries to `.git/info/exclude` for dependency-owned skill directories; it does not ignore the whole `.agents/skills/` directory. Skill names are global within that directory. Authored names are preserved; missing names default to `<crate>-<filename>`. If multiple versions of one crate provide the same skill, select one provider explicitly. The top-level resource name `SKILL.md` is reserved for generated instructions.
 
 Read the installed Markdown guides under `.agents/context/SELECTOR/` for guidance from each provider, including the language-agnostic specification and recommendations for organizing package context and repository instructions.
 
 The provider's `context/` directory is source content and should be versioned with the crate. It is different from `.agents/context/`, which is a generated copy installed into a consumer project.
 
-Each installed skill directory contains `skill.json` with its provider ecosystem, package, and version. Cargo refreshes reconcile Cargo-owned skills and reject conflicting ownership. See the portable specification for the shared format.
+Installed `SKILL.md` front matter records `metadata.type: skill` and the resolved `metadata.ecosystem`, `metadata.package`, and `metadata.version`. Cargo refreshes reconcile skills within their selected ecosystem and package scope. A full refresh also removes skills from removed or empty providers. After resolving an installation error, rerun the command to refresh generated files.

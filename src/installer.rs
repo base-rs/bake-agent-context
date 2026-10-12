@@ -1,6 +1,7 @@
 // Released under the MIT License.
 // Copyright, 2026, by Samuel Williams.
 
+use super::package_context::PackageContext;
 #[cfg(test)]
 use super::test_filesystem as fs;
 use bake::{Error, Result};
@@ -45,6 +46,13 @@ impl ContextPackage {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContextFile {
     pub path: PathBuf,
+}
+
+/// The provider and skill names refreshed by an installation.
+#[derive(Debug)]
+pub struct Installation {
+    pub context: Vec<String>,
+    pub skills: Vec<String>,
 }
 
 /// Discovers, lists, reads, and installs context from resolved Cargo dependencies.
@@ -192,83 +200,92 @@ impl Installer {
         }
     }
 
+    /// List ordinary context from one loaded provider.
     pub fn list_context_files(&self, package: &ContextPackage) -> Result<Vec<ContextFile>> {
-        let mut files = Vec::new();
-        collect_files(&package.context_path, &mut files)?;
-        files.sort();
-
-        let skill_names: HashSet<_> = super::skill::list_package_skills(package)?
-            .into_iter()
-            .map(|skill| skill.source_name)
-            .collect();
-        Ok(files
-            .into_iter()
-            .filter_map(|file| {
-                file.strip_prefix(&package.context_path)
-                    .ok()
-                    .map(|path| ContextFile {
-                        path: path.to_path_buf(),
-                    })
+        let context = PackageContext::load(package)?;
+        Ok(context
+            .files
+            .keys()
+            .map(|path| ContextFile {
+                path: path
+                    .strip_prefix(&package.context_path)
+                    .expect("context files belong to their package")
+                    .to_owned(),
             })
-            .filter(|file| !is_skill_context_path(&file.path, &skill_names))
             .collect())
     }
 
+    /// Show an ordinary document or opaque resource from a provider.
     pub fn show_context_file(&self, selector: &str, file: &str) -> Result<Option<String>> {
         let Some(package) = self.find_package(selector)? else {
             return Ok(None);
         };
-        let Some((context_root, path)) = find_context_file_with_root(&package.context_path, file)?
-        else {
+        let Some((root, path)) = find_context_file_with_root(&package.context_path, file)? else {
             return Ok(None);
         };
-
-        let skill_names: HashSet<_> = super::skill::list_package_skills(&package)?
-            .into_iter()
-            .map(|skill| skill.source_name)
-            .collect();
-        let relative_path = path
-            .strip_prefix(&context_root)
-            .expect("find_context_file only returns paths within context_root");
-        if is_skill_context_path(relative_path, &skill_names) {
-            return Ok(None);
+        let context = PackageContext::load(&package)?;
+        let relative = path
+            .strip_prefix(root)
+            .expect("resolved context paths stay within their root");
+        match context.files.get(&package.context_path.join(relative)) {
+            Some(Some(document)) => Ok(Some(document.content.clone())),
+            Some(None) => read_context_file(&path),
+            None => Ok(None),
         }
-
-        read_context_file(&path)
     }
 
-    /// Install one package's context. Returns `false` when it does not provide context.
+    /// Refresh ordinary context for one provider.
     pub fn install_package(&self, selector: &str) -> Result<bool> {
         let Some(package) = self.find_package(selector)? else {
             return Ok(false);
         };
-        let skills = super::skill::list_package_skills(&package)?;
-        let skill_names: HashSet<_> = skills.into_iter().map(|skill| skill.source_name).collect();
-
-        fs::create_dir_all(&self.context_path).map_err(|error| {
-            Error::new(format!(
-                "cannot create {}: {error}",
-                self.context_path.display()
-            ))
-        })?;
-        let destination = self.context_path.join(&package.selector);
-        remove_existing(&destination)?;
-        let copied = copy_context_tree(&package.context_path, &destination, &skill_names, true)?;
-        if !copied {
-            remove_existing(&destination)?;
-        }
-        Ok(copied)
+        PackageContext::load(&package)?
+            .install(&package, &self.context_path.join(package.selector()))
     }
 
-    /// Install all resolved dependency packages that provide context.
+    /// Refresh ordinary context for every resolved provider.
     pub fn install_all(&self) -> Result<Vec<String>> {
         let mut installed = Vec::new();
         for package in &self.packages {
-            if self.install_package(&package.selector)? {
-                installed.push(package.selector.clone());
+            if self.install_package(package.selector())? {
+                installed.push(package.selector().to_owned());
             }
         }
         Ok(installed)
+    }
+
+    /// Install context and skills from the same loaded provider documents.
+    pub fn install(&self, selector: Option<&str>) -> Result<Installation> {
+        // Resolve the requested scope and load each provider once:
+        let packages =
+            if let Some(selector) = selector {
+                vec![self.find_package(selector)?.ok_or_else(|| {
+                    Error::new(format!("no context found for crate {selector:?}"))
+                })?]
+            } else {
+                self.packages.clone()
+            };
+        let loaded = packages
+            .iter()
+            .map(|package| PackageContext::load(package).map(|context| (package, context)))
+            .collect::<Result<Vec<_>>>()?;
+        let definitions: Vec<_> = loaded
+            .iter()
+            .flat_map(|(_, context)| context.skills.clone())
+            .collect();
+        let package = selector
+            .and_then(|_| packages.first())
+            .map(|package| package.name.as_str());
+
+        // Refresh skills and ordinary files from those loaded representations:
+        let skills = super::skill::install_definitions(&self.root, &definitions, package, true)?;
+        let mut context = Vec::new();
+        for (package, files) in loaded {
+            if files.install(package, &self.context_path.join(package.selector()))? {
+                context.push(package.selector().to_owned());
+            }
+        }
+        Ok(Installation { context, skills })
     }
 }
 
@@ -399,141 +416,7 @@ fn read_context_file(path: &Path) -> Result<Option<String>> {
         .map_err(|error| Error::new(format!("cannot read {}: {error}", path.display())))
 }
 
-pub(crate) fn markdown_files(root: &Path) -> Result<Vec<PathBuf>> {
-    let mut files = Vec::new();
-    collect_markdown_files(root, &mut files)?;
-    files.sort();
-    Ok(files)
-}
-
-fn collect_markdown_files(directory: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
-    let entries = fs::read_dir(directory)
-        .map_err(|error| Error::new(format!("cannot read {}: {error}", directory.display())))?;
-    for entry in entries {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
-        let path = entry.path();
-        if file_type.is_dir() {
-            collect_markdown_files(&path, files)?;
-        } else if file_type.is_file()
-            && path
-                .extension()
-                .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
-        {
-            files.push(path);
-        }
-    }
-    Ok(())
-}
-
-fn collect_files(directory: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
-    let entries = fs::read_dir(directory)
-        .map_err(|error| Error::new(format!("cannot read {}: {error}", directory.display())))?;
-    for entry in entries {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
-        let path = entry.path();
-        if file_type.is_dir() {
-            collect_files(&path, files)?;
-        } else if file_type.is_file() {
-            files.push(path);
-        }
-    }
-    Ok(())
-}
-
-fn copy_context_tree(
-    source: &Path,
-    destination: &Path,
-    skill_names: &HashSet<String>,
-    root: bool,
-) -> Result<bool> {
-    let source_type = fs::symlink_metadata(source)
-        .map_err(|error| Error::new(format!("cannot inspect {}: {error}", source.display())))?
-        .file_type();
-    if !source_type.is_dir() {
-        return Err(Error::new(format!(
-            "context provider {} is not a regular directory",
-            source.display()
-        )));
-    }
-
-    fs::create_dir_all(destination)
-        .map_err(|error| Error::new(format!("cannot create {}: {error}", destination.display())))?;
-    let entries = fs::read_dir(source)
-        .map_err(|error| Error::new(format!("cannot read {}: {error}", source.display())))?;
-    let mut copied = false;
-    for entry in entries {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
-        let source_path = entry.path();
-        let destination_path = destination.join(entry.file_name());
-        if file_type.is_dir() {
-            if root
-                && entry
-                    .file_name()
-                    .to_str()
-                    .is_some_and(|name| skill_names.contains(name))
-            {
-                continue;
-            }
-
-            if copy_context_tree(&source_path, &destination_path, skill_names, false)? {
-                copied = true;
-            } else {
-                remove_empty_context_directory(&destination_path)?;
-            }
-        } else if file_type.is_file() {
-            if root && is_skill_markdown(&source_path, skill_names) {
-                continue;
-            }
-            fs::copy(&source_path, &destination_path).map_err(|error| {
-                Error::new(format!(
-                    "cannot copy {} to {}: {error}",
-                    source_path.display(),
-                    destination_path.display()
-                ))
-            })?;
-            copied = true;
-        }
-    }
-    Ok(copied)
-}
-
-fn remove_empty_context_directory(path: &Path) -> Result<()> {
-    fs::remove_dir(path).map_err(|error| {
-        Error::new(format!(
-            "cannot remove empty context directory {}: {error}",
-            path.display()
-        ))
-    })
-}
-
-fn is_skill_context_path(path: &Path, skill_names: &HashSet<String>) -> bool {
-    let mut components = path.components();
-    let Some(first) = components
-        .next()
-        .and_then(|component| component.as_os_str().to_str())
-    else {
-        return false;
-    };
-    if skill_names.contains(first) {
-        return true;
-    }
-
-    components.next().is_none() && is_skill_markdown(path, skill_names)
-}
-
-fn is_skill_markdown(path: &Path, skill_names: &HashSet<String>) -> bool {
-    path.extension()
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
-        && path
-            .file_stem()
-            .and_then(|stem| stem.to_str())
-            .is_some_and(|stem| skill_names.contains(stem))
-}
-
-fn remove_existing(path: &Path) -> Result<()> {
+pub(crate) fn remove_existing(path: &Path) -> Result<()> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -556,30 +439,6 @@ fn remove_existing(path: &Path) -> Result<()> {
 mod tests {
     use super::*;
     use tempfile::tempdir;
-
-    fn package(name: &str, version: &str, context_path: PathBuf) -> ContextPackage {
-        ContextPackage {
-            name: name.to_owned(),
-            version: version.to_owned(),
-            description: None,
-            context_path,
-            selector: format!("{name}@{version}"),
-        }
-    }
-
-    fn installer(root: &Path, packages: Vec<ContextPackage>) -> Installer {
-        Installer {
-            root: root.to_path_buf(),
-            context_path: root.join(".agents/context"),
-            packages,
-        }
-    }
-
-    fn write(root: &Path, relative: &str, contents: &str) {
-        let path = root.join(relative);
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(path, contents).unwrap();
-    }
 
     fn cargo_package(id: &str, name: &str, version: &str, manifest_path: PathBuf) -> CargoPackage {
         CargoPackage {
@@ -808,396 +667,6 @@ mod tests {
         assert!(find_context_file(&context.join("missing"), "guide.md").is_err());
         assert!(canonical_context_root(&context.join("does-not-exist")).is_err());
         assert!(read_context_file(&context).is_err());
-
-        let markdown = markdown_files(&context).unwrap();
-        assert_eq!(markdown.len(), 2);
-        assert!(markdown[0] < markdown[1]);
-
-        let files_path = context.join("not-a-directory");
-        fs::write(&files_path, "file").unwrap();
-        assert!(markdown_files(&files_path).is_err());
-        assert!(collect_files(&files_path, &mut Vec::new()).is_err());
-    }
-
-    #[test]
-    fn hides_skill_files_assets_and_preserves_regular_context_files() {
-        let directory = tempdir().unwrap();
-        let root = directory.path();
-        let source = root.join("provider/context");
-        fs::create_dir_all(source.join("nested")).unwrap();
-        fs::create_dir_all(source.join("empty")).unwrap();
-        write(&source, "guide.md", "# Guide\n");
-        write(
-            &source,
-            "my-skill.md",
-            "---\ntype: skill\ndescription: A skill.\n---\n\n# Skill\n",
-        );
-        write(&source, "my-skill/reference.md", "asset\n");
-        write(&source, "nested/guide.md", "nested\n");
-        write(&source, "nested/my-skill.md", "ordinary nested context\n");
-        write(&source, "README.MD", "upper-case extension\n");
-        fs::write(source.join("plain.txt"), "text").unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::symlink;
-            symlink(source.join("guide.md"), source.join("linked.md")).unwrap();
-        }
-
-        let package = package("provider", "1.0.0", source.clone());
-        let installer = installer(root, vec![package.clone()]);
-        let listed = installer.list_context_files(&package).unwrap();
-        let listed: Vec<_> = listed
-            .iter()
-            .map(|file| file.path.to_string_lossy().replace('\\', "/"))
-            .collect();
-        assert_eq!(
-            listed,
-            [
-                "README.MD",
-                "guide.md",
-                "nested/guide.md",
-                "nested/my-skill.md",
-                "plain.txt"
-            ]
-        );
-
-        assert!(!installer.install_package("missing").unwrap());
-        assert!(installer.install_package("provider@1.0.0").unwrap());
-        let installed = root.join(".agents/context/provider@1.0.0");
-        assert!(installed.join("guide.md").is_file());
-        assert!(installed.join("nested/my-skill.md").is_file());
-        assert!(!installed.join("my-skill.md").exists());
-        assert!(!installed.join("my-skill").exists());
-        assert!(!installed.join("empty").exists());
-    }
-
-    #[test]
-    fn removes_empty_installations_and_surfaces_destination_errors() {
-        let directory = tempdir().unwrap();
-        let root = directory.path();
-        let source = root.join("provider/context");
-        fs::create_dir_all(&source).unwrap();
-        write(
-            &source,
-            "skill.md",
-            "---\ntype: skill\ndescription: Skill.\n---\n\n# Skill\n",
-        );
-        fs::create_dir_all(source.join("skill/assets")).unwrap();
-        fs::write(source.join("skill/assets/image.png"), "asset").unwrap();
-        let installer = installer(root, vec![package("provider", "1.0.0", source)]);
-
-        assert!(!installer.install_package("provider@1.0.0").unwrap());
-        assert!(!root.join(".agents/context/provider@1.0.0").exists());
-
-        let blocker = root.join(".agents");
-        fs::remove_dir_all(&blocker).unwrap();
-        fs::write(&blocker, "not a directory").unwrap();
-        assert!(installer.install_package("provider@1.0.0").is_err());
-    }
-
-    #[test]
-    fn copies_context_tree_while_skipping_symlinks_and_reports_copy_errors() {
-        #[cfg(unix)]
-        use std::os::unix::fs::symlink;
-
-        let directory = tempdir().unwrap();
-        let root = directory.path();
-        let source = root.join("source");
-        fs::create_dir_all(source.join("empty")).unwrap();
-        fs::create_dir_all(source.join("nested")).unwrap();
-        fs::write(source.join("guide.md"), "guide").unwrap();
-        fs::write(source.join("skill.md"), "skill").unwrap();
-        fs::write(source.join("nested/guide.md"), "nested").unwrap();
-        #[cfg(unix)]
-        symlink(root.join("source/guide.md"), source.join("linked.md")).unwrap();
-        let destination = root.join("destination");
-        assert!(
-            copy_context_tree(
-                &source,
-                &destination,
-                &HashSet::from(["skill".to_owned()]),
-                true
-            )
-            .unwrap()
-        );
-        assert!(destination.join("guide.md").is_file());
-        assert!(destination.join("nested/guide.md").is_file());
-        assert!(!destination.join("skill.md").exists());
-        assert!(!destination.join("empty").exists());
-        assert!(!destination.join("linked.md").exists());
-
-        let non_directory = root.join("not-a-directory");
-        fs::write(&non_directory, "file").unwrap();
-        assert!(
-            copy_context_tree(&non_directory, &root.join("out"), &HashSet::new(), true).is_err()
-        );
-        let missing = root.join("missing");
-        assert!(copy_context_tree(&missing, &root.join("out"), &HashSet::new(), true).is_err());
-
-        let blocker = root.join("blocker");
-        fs::write(&blocker, "file").unwrap();
-        assert!(copy_context_tree(&source, &blocker.join("out"), &HashSet::new(), true).is_err());
-
-        let bad_destination = root.join("bad-copy");
-        fs::create_dir_all(bad_destination.join("guide.md")).unwrap();
-        assert!(copy_context_tree(&source, &bad_destination, &HashSet::new(), true).is_err());
-
-        let nonempty = root.join("nonempty");
-        fs::create_dir_all(&nonempty).unwrap();
-        fs::write(nonempty.join("child"), "file").unwrap();
-        assert!(remove_empty_context_directory(&nonempty).is_err());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn reports_context_tree_directory_read_errors() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let directory = tempdir().unwrap();
-        let source = directory.path().join("source");
-        fs::create_dir(&source).unwrap();
-        fs::set_permissions(&source, fs::Permissions::from_mode(0o000)).unwrap();
-
-        let result = copy_context_tree(
-            &source,
-            &directory.path().join("destination"),
-            &HashSet::new(),
-            true,
-        );
-        fs::set_permissions(&source, fs::Permissions::from_mode(0o755)).unwrap();
-
-        assert!(result.unwrap_err().to_string().contains("cannot read"));
-    }
-
-    #[test]
-    fn reports_directory_entry_type_and_recursive_read_errors() {
-        let directory = tempdir().unwrap();
-        let root = directory.path().join("context");
-        fs::create_dir_all(root.join("nested")).unwrap();
-        fs::write(root.join("guide.md"), "guide").unwrap();
-
-        let failure_path = root.clone();
-        let _failure = fs::fail_once(fs::Operation::ReadDirectoryEntry, move |path| {
-            path == failure_path
-        });
-        assert!(
-            markdown_files(&root)
-                .unwrap_err()
-                .to_string()
-                .contains("injected")
-        );
-        drop(_failure);
-
-        let file = root.join("guide.md");
-        let failure_path = file.clone();
-        let _failure = fs::fail_once(fs::Operation::FileType, move |path| path == failure_path);
-        assert!(
-            markdown_files(&root)
-                .unwrap_err()
-                .to_string()
-                .contains("injected")
-        );
-        drop(_failure);
-
-        let failure_path = root.join("nested");
-        let _failure = fs::fail_once(fs::Operation::ReadDirectory, move |path| {
-            path == failure_path
-        });
-        assert!(
-            markdown_files(&root)
-                .unwrap_err()
-                .to_string()
-                .contains("cannot read")
-        );
-        drop(_failure);
-
-        let failure_path = root.clone();
-        let _failure = fs::fail_once(fs::Operation::ReadDirectoryEntry, move |path| {
-            path == failure_path
-        });
-        assert!(collect_files(&root, &mut Vec::new()).is_err());
-        drop(_failure);
-
-        let failure_path = file;
-        let _failure = fs::fail_once(fs::Operation::FileType, move |path| path == failure_path);
-        assert!(collect_files(&root, &mut Vec::new()).is_err());
-        drop(_failure);
-
-        let failure_path = root.join("nested");
-        let _failure = fs::fail_once(fs::Operation::ReadDirectory, move |path| {
-            path == failure_path
-        });
-        assert!(collect_files(&root, &mut Vec::new()).is_err());
-    }
-
-    #[test]
-    fn reports_copy_entry_type_recursive_and_empty_directory_errors() {
-        let directory = tempdir().unwrap();
-        let source = directory.path().join("source");
-        fs::create_dir_all(source.join("nested")).unwrap();
-        fs::create_dir(source.join("empty")).unwrap();
-        fs::write(source.join("guide.md"), "guide").unwrap();
-
-        let failure_path = source.clone();
-        let _failure = fs::fail_once(fs::Operation::ReadDirectoryEntry, move |path| {
-            path == failure_path
-        });
-        assert!(
-            copy_context_tree(
-                &source,
-                &directory.path().join("entry"),
-                &HashSet::new(),
-                true
-            )
-            .unwrap_err()
-            .to_string()
-            .contains("injected")
-        );
-        drop(_failure);
-
-        let failure_path = source.join("guide.md");
-        let _failure = fs::fail_once(fs::Operation::FileType, move |path| path == failure_path);
-        assert!(
-            copy_context_tree(
-                &source,
-                &directory.path().join("type"),
-                &HashSet::new(),
-                true
-            )
-            .unwrap_err()
-            .to_string()
-            .contains("injected")
-        );
-        drop(_failure);
-
-        let failure_path = source.join("nested");
-        let _failure = fs::fail_once(fs::Operation::ReadDirectory, move |path| {
-            path == failure_path
-        });
-        assert!(
-            copy_context_tree(
-                &source,
-                &directory.path().join("recursive"),
-                &HashSet::new(),
-                true
-            )
-            .unwrap_err()
-            .to_string()
-            .contains("cannot read")
-        );
-        drop(_failure);
-
-        let empty_destination = directory.path().join("empty-destination/empty");
-        let failure_path = empty_destination.clone();
-        let _failure = fs::fail_once(fs::Operation::RemoveDirectory, move |path| {
-            path == failure_path
-        });
-        assert!(
-            copy_context_tree(
-                &source,
-                &directory.path().join("empty-destination"),
-                &HashSet::new(),
-                true
-            )
-            .unwrap_err()
-            .to_string()
-            .contains("cannot remove empty context directory")
-        );
-    }
-
-    #[test]
-    fn propagates_package_operation_errors() {
-        let directory = tempdir().unwrap();
-        let root = directory.path();
-        let source = root.join("provider/context");
-        fs::create_dir_all(&source).unwrap();
-        fs::write(source.join("guide.md"), "# Guide\n").unwrap();
-        fs::write(source.join("binary.txt"), [0xff]).unwrap();
-        let provider_package = package("provider", "1.0.0", source.clone());
-        let provider_installer = installer(root, vec![provider_package.clone()]);
-
-        assert_eq!(
-            provider_installer
-                .show_context_file("provider", "guide.md")
-                .unwrap(),
-            Some("# Guide\n".to_owned())
-        );
-        assert!(
-            provider_installer
-                .show_context_file("provider", "binary.txt")
-                .unwrap_err()
-                .to_string()
-                .contains("cannot read")
-        );
-
-        let mut ambiguous = provider_package.clone();
-        ambiguous.version = "2.0.0".to_owned();
-        ambiguous.selector = "provider@2.0.0".to_owned();
-        let ambiguous_installer = installer(root, vec![provider_package.clone(), ambiguous]);
-        assert!(
-            ambiguous_installer
-                .show_context_file("provider", "guide.md")
-                .unwrap_err()
-                .to_string()
-                .contains("multiple versions")
-        );
-
-        let destination = root.join(".agents/context/provider@1.0.0");
-        let failure_path = destination.clone();
-        let _failure = fs::fail_once(fs::Operation::Inspect, move |path| path == failure_path);
-        assert!(provider_installer.install_package("provider").is_err());
-        drop(_failure);
-
-        let failure_path = source.join("guide.md");
-        let _failure = fs::fail_once(fs::Operation::Copy, move |path| path == failure_path);
-        assert!(provider_installer.install_package("provider").is_err());
-        drop(_failure);
-
-        let skill_only = root.join("skills/context");
-        fs::create_dir_all(skill_only.join("skill/assets")).unwrap();
-        fs::write(
-            skill_only.join("skill.md"),
-            "---\ntype: skill\ndescription: Skill.\n---\n\n# Skill\n",
-        )
-        .unwrap();
-        fs::write(skill_only.join("skill/assets/image.png"), "asset").unwrap();
-        let skill_installer = installer(root, vec![package("skills", "1.0.0", skill_only)]);
-        let empty_destination = root.join(".agents/context/skills@1.0.0");
-        let failure_path = empty_destination.clone();
-        let _failure = fs::fail_once(fs::Operation::RemoveDirectoryTree, move |path| {
-            path == failure_path
-        });
-        assert!(skill_installer.install_package("skills").is_err());
-        drop(_failure);
-        assert!(skill_installer.install_all().unwrap().is_empty());
-
-        let bad = root.join("broken/context");
-        fs::create_dir_all(&bad).unwrap();
-        fs::write(bad.join("broken.md"), "---\ntype: guide\n---\n# Bad\n").unwrap();
-        let broken_installer = installer(root, vec![package("broken", "1.0.0", bad)]);
-        assert!(
-            broken_installer
-                .list_context_files(&broken_installer.packages[0])
-                .is_err()
-        );
-        assert!(
-            broken_installer
-                .show_context_file("broken", "broken.md")
-                .is_err()
-        );
-        assert!(broken_installer.install_package("broken").is_err());
-        assert!(broken_installer.install_all().is_err());
-
-        let files_installer = installer(root, vec![provider_package]);
-        let failure_path = source.clone();
-        let _failure = fs::fail_once(fs::Operation::ReadDirectory, move |path| {
-            path == failure_path
-        });
-        assert!(
-            files_installer
-                .list_context_files(&files_installer.packages[0])
-                .is_err()
-        );
     }
 
     #[cfg(unix)]
@@ -1218,80 +687,6 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("cannot remove"));
     }
 
-    #[test]
-    fn shows_only_regular_context_and_handles_missing_packages_and_files() {
-        let directory = tempdir().unwrap();
-        let root = directory.path();
-        let source = root.join("provider/context");
-        fs::create_dir_all(&source).unwrap();
-        write(&source, "guide.md", "# Guide\n");
-        write(
-            &source,
-            "skill.md",
-            "---\ntype: skill\ndescription: A skill.\n---\n\n# Skill\n",
-        );
-        let package = package("provider", "1.0.0", source.clone());
-        let installer = installer(root, vec![package]);
-
-        assert!(
-            installer
-                .show_context_file("missing", "guide.md")
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            installer
-                .show_context_file("provider@1.0.0", "missing.md")
-                .unwrap()
-                .is_none()
-        );
-        assert_eq!(
-            installer
-                .show_context_file("provider@1.0.0", "guide")
-                .unwrap(),
-            Some("# Guide\n".to_owned())
-        );
-        assert!(
-            installer
-                .show_context_file("provider@1.0.0", "skill")
-                .unwrap()
-                .is_none()
-        );
-    }
-
-    #[test]
-    fn installs_all_context_packages_in_selector_order() {
-        let directory = tempdir().unwrap();
-        let root = directory.path();
-        let zeta = root.join("zeta/context");
-        let alpha = root.join("alpha/context");
-        fs::create_dir_all(&zeta).unwrap();
-        fs::create_dir_all(&alpha).unwrap();
-        fs::write(zeta.join("guide.md"), "Zeta guide.\n").unwrap();
-        fs::write(alpha.join("guide.md"), "Alpha guide.\n").unwrap();
-
-        let populated = installer(
-            root,
-            vec![
-                package("alpha", "1.0.0", alpha),
-                package("zeta", "1.0.0", zeta),
-            ],
-        );
-        assert_eq!(
-            populated.install_all().unwrap(),
-            ["alpha@1.0.0", "zeta@1.0.0"]
-        );
-        assert!(root.join(".agents/context/alpha@1.0.0/guide.md").is_file());
-        assert!(root.join(".agents/context/zeta@1.0.0/guide.md").is_file());
-
-        assert!(
-            installer(root, Vec::new())
-                .install_all()
-                .unwrap()
-                .is_empty()
-        );
-    }
-
     #[cfg(unix)]
     #[test]
     fn rejects_context_file_symlinks_that_escape_the_provider() {
@@ -1307,32 +702,6 @@ mod tests {
         assert_eq!(find_context_file(&context, "external.md").unwrap(), None);
     }
 
-    #[test]
-    fn path_classification_and_removal_cover_files_directories_and_errors() {
-        let names = HashSet::from(["skill".to_owned()]);
-        assert!(is_skill_context_path(
-            Path::new("skill/references/a.md"),
-            &names
-        ));
-        assert!(is_skill_context_path(Path::new("skill.MD"), &names));
-        assert!(!is_skill_context_path(Path::new("nested/skill.md"), &names));
-        assert!(!is_skill_context_path(Path::new(""), &names));
-        assert!(is_skill_markdown(Path::new("skill.MD"), &names));
-        assert!(!is_skill_markdown(Path::new("skill.txt"), &names));
-
-        let directory = tempdir().unwrap();
-        let root = directory.path();
-        let absent = root.join("absent");
-        remove_existing(&absent).unwrap();
-        let file = root.join("file");
-        fs::write(&file, "file").unwrap();
-        remove_existing(&file).unwrap();
-        let folder = root.join("folder");
-        fs::create_dir(&folder).unwrap();
-        remove_existing(&folder).unwrap();
-        assert!(!folder.exists());
-    }
-
     #[cfg(unix)]
     #[test]
     fn reports_removal_errors_for_paths_beneath_files() {
@@ -1340,5 +709,75 @@ mod tests {
         let blocker = directory.path().join("blocker");
         fs::write(&blocker, "file").unwrap();
         assert!(remove_existing(&blocker.join("child")).is_err());
+    }
+    #[test]
+    fn coordinates_ordinary_files_skills_and_empty_providers() {
+        let directory = tempdir().unwrap();
+        let root = directory.path();
+        let context = root.join("provider/context");
+        fs::create_dir_all(&context).unwrap();
+        fs::write(context.join("guide.md"), "# Guide\n").unwrap();
+        fs::write(context.join("data.txt"), "Opaque resource").unwrap();
+        fs::write(
+            context.join("workflow.md"),
+            "---\nmetadata: {type: skill}\ndescription: Workflow.\n---\n",
+        )
+        .unwrap();
+        let package = ContextPackage::for_test("provider", "1.0.0", context.clone());
+        let installer = Installer::for_test(root, vec![package.clone()]);
+        assert_eq!(
+            installer
+                .show_context_file("provider", "data.txt")
+                .unwrap()
+                .as_deref(),
+            Some("Opaque resource")
+        );
+        assert!(
+            installer
+                .show_context_file("provider", "workflow")
+                .unwrap()
+                .is_none()
+        );
+        assert!(!installer.install_package("missing").unwrap());
+        assert!(
+            installer
+                .install(Some("missing"))
+                .unwrap_err()
+                .to_string()
+                .contains("no context found")
+        );
+        let ambiguous = Installer::for_test(root, vec![package.clone(), package]);
+        assert!(ambiguous.install(Some("provider")).is_err());
+        let loaded = installer.install(None).unwrap();
+        assert_eq!(loaded.context, ["provider@1.0.0"]);
+        assert_eq!(loaded.skills, ["provider-workflow (provider@1.0.0)"]);
+        fs::remove_file(context.join("guide.md")).unwrap();
+        fs::remove_file(context.join("data.txt")).unwrap();
+        assert!(installer.install_all().unwrap().is_empty());
+        assert!(installer.install(None).unwrap().context.is_empty());
+        fs::write(context.join("broken.md"), "---\n[invalid\n---\n").unwrap();
+        assert!(installer.show_context_file("provider", "workflow").is_err());
+        assert!(installer.install_package("provider").is_err());
+        assert!(installer.install_all().is_err());
+    }
+
+    #[test]
+    fn reports_ordinary_context_write_failures_from_the_main_installation() {
+        let directory = tempdir().unwrap();
+        let root = directory.path();
+        let context = root.join("provider/context");
+        fs::create_dir_all(&context).unwrap();
+        fs::write(context.join("guide.md"), "# Guide\n").unwrap();
+        let package = ContextPackage::for_test("provider", "1.0.0", context);
+        let installer = Installer::for_test(root, vec![package]);
+        let destination = root.join(".agents/context/provider@1.0.0/guide.md");
+        let _failure = fs::fail_once(fs::Operation::Write, move |path| path == destination);
+        assert!(
+            installer
+                .install(None)
+                .unwrap_err()
+                .to_string()
+                .contains("cannot write")
+        );
     }
 }

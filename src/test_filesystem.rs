@@ -19,10 +19,7 @@ pub(crate) enum Operation {
     Read,
     ReadDirectory,
     ReadDirectoryEntry,
-    RemoveDirectory,
     RemoveDirectoryTree,
-    RenameSource,
-    RenameDestination,
     Write,
 }
 
@@ -145,25 +142,9 @@ pub(crate) fn read_dir(path: impl AsRef<Path>) -> io::Result<ReadDir> {
     })
 }
 
-pub(crate) fn remove_dir(path: impl AsRef<Path>) -> io::Result<()> {
-    check_failure(Operation::RemoveDirectory, path.as_ref())?;
-    std::fs::remove_dir(path)
-}
-
 pub(crate) fn remove_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
     check_failure(Operation::RemoveDirectoryTree, path.as_ref())?;
     std::fs::remove_dir_all(path)
-}
-
-pub(crate) fn read(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
-    check_failure(Operation::Read, path.as_ref())?;
-    std::fs::read(path)
-}
-
-pub(crate) fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
-    check_failure(Operation::RenameSource, from.as_ref())?;
-    check_failure(Operation::RenameDestination, to.as_ref())?;
-    std::fs::rename(from, to)
 }
 
 pub(crate) fn write(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> io::Result<()> {

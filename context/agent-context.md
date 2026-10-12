@@ -8,7 +8,7 @@ Put guidance that benefits users of a crate in its tracked `context/` directory.
 
 Include `context/**` in the published Cargo package when downstream users need the guidance. Agents discover installed Markdown files under `.agents/context/SELECTOR/` or inspect provider files with the list/show commands. Use the `bake-agent-context-usage` skill for file format, skill metadata, and installation details.
 
-Use a skill for a task-oriented procedure that an agent should follow, such as setting up a repository or preparing a pull request. Skills are source Markdown files in `context/` with YAML front matter containing `type: skill` and a description. Bake installs them under `.agents/skills/` with names prefixed by the provider crate. Skill documents are not copied to `.agents/context/`.
+Use a skill for a task-oriented procedure that an agent should follow, such as setting up a repository or preparing a pull request. Skills are source Markdown files in `context/` with YAML front matter containing `metadata.type: skill` and a description. Bake installs them under `.agents/skills/` using authored names or deriving missing names from the provider crate and filename. Skill documents are not copied to `.agents/context/`.
 
 ## Repository-only instructions
 
@@ -22,4 +22,4 @@ Add `bake-agent-context` to the project's private `bake/` package, directly or t
 
 Before changing a project, follow its agent instructions, read relevant installed Markdown guides under `.agents/context/`, and apply skills that fit the work. For details about the available Bake tasks and their options, use the `bake-agent-context-usage` skill.
 
-Each installed skill directory contains `skill.json` with its provider ecosystem, package, and version. Cargo refreshes reconcile Cargo-owned skills and reject conflicting ownership. See the portable specification for the shared format.
+Installed `SKILL.md` front matter records `metadata.type: skill` and the resolved `metadata.ecosystem`, `metadata.package`, and `metadata.version`. Cargo refreshes reconcile skills within their selected ecosystem and package scope. A full refresh also removes skills from removed or empty providers. After resolving an installation error, rerun the command to refresh generated files.
