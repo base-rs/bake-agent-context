@@ -2,13 +2,12 @@
 // Copyright, 2026, by Samuel Williams.
 
 use super::document::ContextDocument;
-use super::installer::{ContextPackage, Installer, remove_existing};
+use super::installer::{ContextPackage, remove_existing};
 use super::ownership::installed_skill_owners;
 #[cfg(test)]
 use super::test_filesystem as filesystem;
 use bake::{Error, Result};
 use serde_yaml_ng::Value;
-use std::cmp::Ordering as Comparison;
 use std::collections::HashSet;
 #[cfg(not(test))]
 use std::fs as filesystem;
@@ -121,44 +120,6 @@ impl Skill {
     }
 }
 
-/// Find context documents marked with `metadata.type: skill` in YAML front matter.
-pub fn list_skills(installer: &Installer, package: Option<&str>) -> Result<Vec<Skill>> {
-    let packages = if let Some(selector) = package {
-        let Some(package) = installer.find_package(selector)? else {
-            return Ok(Vec::new());
-        };
-        vec![package]
-    } else {
-        installer.packages().to_vec()
-    };
-
-    let mut skills = Vec::new();
-    for package in packages {
-        skills.extend(list_package_skills(&package)?);
-    }
-
-    skills.sort_by(compare_skills);
-    Ok(skills)
-}
-
-fn compare_skills(left: &Skill, right: &Skill) -> Comparison {
-    let package_order = left.package.name.cmp(&right.package.name);
-    if package_order != Comparison::Equal {
-        return package_order;
-    }
-
-    let version_order = left.package.version.cmp(&right.package.version);
-    if version_order != Comparison::Equal {
-        return version_order;
-    }
-
-    left.name.cmp(&right.name)
-}
-
-pub(crate) fn list_package_skills(package: &ContextPackage) -> Result<Vec<Skill>> {
-    Ok(super::package_context::PackageContext::load(package)?.skills)
-}
-
 fn skill_assets_path(context_path: &Path, source_name: &str) -> Result<Option<PathBuf>> {
     let assets = context_path.join(source_name);
     match filesystem::symlink_metadata(&assets) {
@@ -173,40 +134,6 @@ fn skill_assets_path(context_path: &Path, source_name: &str) -> Result<Option<Pa
             assets.display()
         ))),
     }
-}
-
-/// Install selected skills and reconcile the corresponding ownership scope.
-pub fn install_skills(
-    installer: &Installer,
-    package_selector: Option<&str>,
-    skill_name: Option<&str>,
-) -> Result<Vec<String>> {
-    // Resolve the selected providers and load their skill definitions:
-    let (selected_package, mut skills) = if let Some(selector) = package_selector {
-        let package = installer
-            .find_package(selector)?
-            .ok_or_else(|| Error::new(format!("no context found for crate {selector:?}")))?;
-        let skills = list_package_skills(&package)?;
-        (Some(package), skills)
-    } else {
-        (None, list_skills(installer, None)?)
-    };
-    if let Some(name) = skill_name {
-        skills.retain(|skill| skill.name == name);
-        if skills.is_empty() {
-            return Err(Error::new(format!(
-                "no dependency skill named {name:?} was found"
-            )));
-        }
-    }
-    install_definitions(
-        installer.root(),
-        &skills,
-        selected_package
-            .as_ref()
-            .map(|package| package.name.as_str()),
-        skill_name.is_none(),
-    )
 }
 
 /// Refresh loaded skills and reconcile stale destinations within the selected scope.
@@ -381,9 +308,50 @@ fn path_exists(path: &Path) -> Result<bool> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::installer::{Definition, Installer};
     use super::*;
     use std::fs;
     use tempfile::tempdir;
+
+    fn list_skills(installer: &Installer, selector: Option<&str>) -> Result<Vec<Skill>> {
+        let packages = if let Some(selector) = selector {
+            let Some(package) = installer.find_package(selector)? else {
+                return Ok(Vec::new());
+            };
+            vec![package]
+        } else {
+            installer.packages().to_vec()
+        };
+
+        let mut skills = Vec::new();
+        for package in packages {
+            for definition in
+                super::super::package_context::PackageContext::load(&package)?.definitions
+            {
+                if let Definition::Skill(skill) = definition {
+                    skills.push(skill);
+                }
+            }
+        }
+        skills.sort_by(|left, right| {
+            left.package
+                .name
+                .cmp(&right.package.name)
+                .then_with(|| left.package.version.cmp(&right.package.version))
+                .then_with(|| left.name.cmp(&right.name))
+        });
+        Ok(skills)
+    }
+
+    fn install_skills(installer: &Installer, selector: Option<&str>) -> Result<Vec<String>> {
+        let skills = list_skills(installer, selector)?;
+        let package = if selector.is_some() {
+            skills.first().map(|skill| skill.package.name.as_str())
+        } else {
+            None
+        };
+        install_definitions(installer.root(), &skills, package, true)
+    }
 
     fn provider(root: &Path, name: &str, version: &str) -> ContextPackage {
         let path = root.join(format!("{name}-{version}/context"));
@@ -427,18 +395,12 @@ mod tests {
         let skills = list_skills(&installer, None).unwrap();
         assert_eq!(skills[0].name, "custom-workflow");
         assert_eq!(skills[0].description, "  Run workflow.  ");
-        install_skills(&installer, None, None).unwrap();
+        install_skills(&installer, None).unwrap();
         assert!(
             directory
                 .path()
                 .join(".agents/skills/custom-workflow/SKILL.md")
                 .is_file()
-        );
-        assert!(
-            !directory
-                .path()
-                .join(".agents/skills/custom-workflow/skill.json")
-                .exists()
         );
     }
 
@@ -459,13 +421,12 @@ mod tests {
         assert_eq!(skills[0].package.version, "1.0.0");
         assert_eq!(skills.last().unwrap().name, "z-provider-zeta");
         assert!(
-            install_skills(&installer, None, None)
+            install_skills(&installer, None)
                 .unwrap_err()
                 .to_string()
                 .contains("multiple selected")
         );
-        assert!(install_skills(&installer, None, Some("a-provider-alpha")).is_err());
-        assert!(install_skills(&installer, Some("a_provider"), None).is_err());
+        assert!(install_skills(&installer, Some("a_provider")).is_err());
         assert!(list_skills(&installer, Some("a_provider")).is_err());
     }
 
@@ -473,6 +434,7 @@ mod tests {
     fn validates_names_and_description_boundaries() {
         let directory = tempdir().unwrap();
         let package = provider(directory.path(), "provider", "1.0.0");
+        let installer = Installer::for_test(directory.path(), vec![package.clone()]);
         for fields in [
             "name: 123\ndescription: Valid.\n".to_owned(),
             "name: null\ndescription: Valid.\n".to_owned(),
@@ -482,7 +444,7 @@ mod tests {
             format!("description: {}\n", "é".repeat(1025)),
         ] {
             write_skill(&package, "workflow", &fields, "Body");
-            assert!(list_package_skills(&package).is_err(), "{fields}");
+            assert!(list_skills(&installer, None).is_err(), "{fields}");
         }
         write_skill(
             &package,
@@ -494,7 +456,7 @@ mod tests {
             ),
             "Body",
         );
-        assert_eq!(list_package_skills(&package).unwrap()[0].name.len(), 64);
+        assert_eq!(list_skills(&installer, None).unwrap()[0].name.len(), 64);
         for name in ["", "-a", "a-", "a--b", "UPPER", &"a".repeat(65)] {
             assert!(validate_skill_name(name).is_err());
         }
@@ -512,14 +474,14 @@ mod tests {
         seed_owner(&skills.join("stale-provider"), "cargo", "provider");
         seed_owner(&skills.join("other-workflow"), "cargo", "other");
         seed_owner(&skills.join("ruby-workflow"), "gem", "provider");
-        install_skills(&installer, Some("provider"), None).unwrap();
+        install_skills(&installer, Some("provider")).unwrap();
         assert!(!skills.join("stale-provider").exists());
         assert!(skills.join("other-workflow").exists());
         assert!(skills.join("ruby-workflow").exists());
         fs::remove_file(package.context_path.join("workflow.md")).unwrap();
-        install_skills(&installer, Some("provider"), None).unwrap();
+        install_skills(&installer, Some("provider")).unwrap();
         assert!(!skills.join("provider-workflow").exists());
-        install_skills(&Installer::for_test(root, vec![]), None, None).unwrap();
+        install_skills(&Installer::for_test(root, vec![]), None).unwrap();
         assert!(!skills.join("other-workflow").exists());
         assert!(skills.join("ruby-workflow").exists());
     }
@@ -533,10 +495,10 @@ mod tests {
         let destination = directory.path().join(".agents/skills/provider-workflow");
         for (ecosystem, package) in [("gem", "provider"), ("cargo", "other")] {
             seed_owner(&destination, ecosystem, package);
-            assert!(install_skills(&installer, None, None).is_err());
+            assert!(install_skills(&installer, None).is_err());
         }
         seed_owner(&destination, "cargo", "provider");
-        install_skills(&installer, None, None).unwrap();
+        install_skills(&installer, None).unwrap();
         assert!(
             fs::read_to_string(destination.join("SKILL.md"))
                 .unwrap()
@@ -552,26 +514,26 @@ mod tests {
         let resources = package.context_path.join("workflow");
         fs::create_dir_all(resources.join("references")).unwrap();
         fs::write(resources.join("references/data.md"), "---\n[invalid YAML\n").unwrap();
-        fs::write(resources.join("skill.json"), "opaque asset").unwrap();
+        fs::write(resources.join("notes.txt"), "opaque asset").unwrap();
         let installer = Installer::for_test(directory.path(), vec![package.clone()]);
-        let failure_path = resources.join("skill.json");
+        let failure_path = resources.join("notes.txt");
         let _failure = filesystem::fail_once(filesystem::Operation::Copy, move |path| {
             path == failure_path
         });
-        assert!(install_skills(&installer, None, None).is_err());
+        assert!(install_skills(&installer, None).is_err());
         let skills = directory.path().join(".agents/skills");
         assert_eq!(
             installed_skill_owners(&skills).unwrap()["provider-workflow"].package,
             "provider"
         );
-        install_skills(&installer, None, None).unwrap();
+        install_skills(&installer, None).unwrap();
         assert_eq!(
-            fs::read_to_string(skills.join("provider-workflow/skill.json")).unwrap(),
+            fs::read_to_string(skills.join("provider-workflow/notes.txt")).unwrap(),
             "opaque asset"
         );
-        fs::remove_file(resources.join("skill.json")).unwrap();
-        install_skills(&installer, None, None).unwrap();
-        assert!(!skills.join("provider-workflow/skill.json").exists());
+        fs::remove_file(resources.join("notes.txt")).unwrap();
+        install_skills(&installer, None).unwrap();
+        assert!(!skills.join("provider-workflow/notes.txt").exists());
     }
 
     #[test]
@@ -610,13 +572,13 @@ mod tests {
             path == instructions
         });
         assert!(
-            install_skills(&installer, None, None)
+            install_skills(&installer, None)
                 .unwrap_err()
                 .to_string()
                 .contains("cannot write")
         );
         assert!(!destination.exists());
-        install_skills(&installer, None, None).unwrap();
+        install_skills(&installer, None).unwrap();
         assert_eq!(
             installed_skill_owners(&root.join(".agents/skills")).unwrap()["provider-workflow"]
                 .package,
@@ -642,19 +604,19 @@ mod tests {
         ] {
             let _failure = filesystem::fail_once(operation, move |candidate| candidate == path);
             assert!(
-                install_skills(&installer, None, None)
+                install_skills(&installer, None)
                     .unwrap_err()
                     .to_string()
                     .contains("injected filesystem failure")
             );
         }
-        install_skills(&installer, None, None).unwrap();
+        install_skills(&installer, None).unwrap();
         let failure_path = destination.clone();
         let _failure = filesystem::fail_once(Operation::RemoveDirectoryTree, move |path| {
             path == failure_path
         });
         assert!(
-            install_skills(&installer, None, None)
+            install_skills(&installer, None)
                 .unwrap_err()
                 .to_string()
                 .contains("cannot remove")
@@ -664,7 +626,7 @@ mod tests {
             path == destination
         });
         assert!(
-            install_skills(&installer, None, None)
+            install_skills(&installer, None)
                 .unwrap_err()
                 .to_string()
                 .contains("cannot remove")
@@ -692,7 +654,7 @@ mod tests {
         ] {
             let _failure = filesystem::fail_once(operation, move |candidate| candidate == path);
             assert!(
-                install_skills(&installer, None, None)
+                install_skills(&installer, None)
                     .unwrap_err()
                     .to_string()
                     .contains("injected filesystem failure")
@@ -722,12 +684,12 @@ mod tests {
         let installer = Installer::for_test(root, vec![package]);
         let exclude = root.join(".git/info/exclude");
         fs::write(&exclude, "# BEGIN bake-agent-context\n").unwrap();
-        assert!(install_skills(&installer, None, None).is_err());
+        assert!(install_skills(&installer, None).is_err());
         fs::write(&exclude, "# Project exclusions\n").unwrap();
         let _failure =
             filesystem::fail_once(filesystem::Operation::Write, move |path| path == exclude);
         assert!(
-            install_skills(&installer, None, None)
+            install_skills(&installer, None)
                 .unwrap_err()
                 .to_string()
                 .contains("injected filesystem failure")

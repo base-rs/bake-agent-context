@@ -25,14 +25,11 @@ cargo bake agent:context:list
 cargo bake agent:context:list --package socketry-executor
 cargo bake agent:context:show --package socketry-executor --file getting-started
 cargo bake agent:context:install --package socketry-executor
-cargo bake agent:context:skill:list
-cargo bake agent:context:skill:install
-cargo bake agent:context:skill:install --package socketry-executor --skill socketry-executor-initial-gem-setup
 ```
 
-`cargo bake agent:context:install` copies ordinary guidance to `.agents/context/SELECTOR/` and maintains local Git exclusions for installed context and dependency skills. Browse the installed Markdown files or use the list/show commands to find relevant guides. Project-owned skills can be tracked under `.agents/skills/`.
+`cargo bake agent:context:list --package CRATE` marks skill documents with `(skill)`. The list, show, and install tasks handle skills alongside ordinary context. `cargo bake agent:context:install` copies ordinary guidance to `.agents/context/SELECTOR/` and maintains local Git exclusions for installed context and dependency skills. Browse the installed Markdown files or use the list/show commands to find relevant guides. Project-owned skills can be tracked under `.agents/skills/`.
 
-Context documents marked with `metadata.type: skill` are installed only under `.agents/skills/`, along with their companion resources. Their installed names use the authored `name`, or default to `<crate>-<filename>`, and they are omitted from `.agents/context/`. Use `agent:context:install --package CRATE` to install both context and skills from one provider. The separate skill tasks are useful for listing skills or installing a selected skill. Project-owned skills can live in `.agents/skills/` and remain version controlled.
+Context documents marked with `metadata.type: skill` are installed only under `.agents/skills/`, along with their companion resources. Their installed names use the authored `name`, or default to `<crate>-<filename>`, and they are omitted from `.agents/context/`. Use `agent:context:install --package CRATE` to install both context and skills from one provider. Project-owned skills can live in `.agents/skills/` and remain version controlled.
 
 ## Provide context from a crate
 

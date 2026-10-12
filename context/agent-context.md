@@ -18,7 +18,7 @@ Repository instructions can direct agents to discover and read relevant Markdown
 
 ## Install and update
 
-Add `bake-agent-context` to the project's private `bake/` package, directly or through a shared task package such as `socketry-project`. Run `cargo bake agent:context:install` to install ordinary context and skills from resolved dependencies. Run it again after changing a context-providing dependency. Use `--package CRATE` to install from one provider, or the skill-specific tasks to list and install selected skills.
+Add `bake-agent-context` to the project's private `bake/` package, directly or through a shared task package such as `socketry-project`. Run `cargo bake agent:context:install` to install ordinary context and skills from resolved dependencies. Run it again after changing a context-providing dependency. Use `--package CRATE` to list, show, or install definitions from one provider.
 
 Before changing a project, follow its agent instructions, read relevant installed Markdown guides under `.agents/context/`, and apply skills that fit the work. For details about the available Bake tasks and their options, use the `bake-agent-context-usage` skill.
 

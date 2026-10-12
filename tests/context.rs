@@ -2,7 +2,7 @@
 // Copyright, 2026, by Samuel Williams.
 
 use bake::Registry;
-use bake_agent_context::{Installer, install_skills, list_skills};
+use bake_agent_context::{Definition, Installer, Skill};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -17,6 +17,34 @@ fn write(root: &Path, relative_path: &str, contents: &str) {
     let path = root.join(relative_path);
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(path, contents).unwrap();
+}
+
+fn skill_definitions(installer: &Installer, selector: Option<&str>) -> bake::Result<Vec<Skill>> {
+    let packages = if let Some(selector) = selector {
+        let Some(package) = installer.find_package(selector)? else {
+            return Ok(Vec::new());
+        };
+        vec![package]
+    } else {
+        installer.packages().to_vec()
+    };
+
+    let mut skills = Vec::new();
+    for package in packages {
+        for definition in installer.list_context_definitions(&package)? {
+            if let Definition::Skill(skill) = definition {
+                skills.push(skill);
+            }
+        }
+    }
+    Ok(skills)
+}
+
+fn install_context_and_skills(
+    installer: &Installer,
+    selector: Option<&str>,
+) -> bake::Result<Vec<String>> {
+    Ok(installer.install(selector)?.skills)
 }
 
 fn project() -> (TempDir, std::path::PathBuf) {
@@ -94,7 +122,7 @@ fn project() -> (TempDir, std::path::PathBuf) {
 }
 
 #[test]
-fn lists_context_files_without_listing_skill_documents_or_assets() {
+fn lists_context_definitions_with_skill_markers() {
     let (_directory, root) = project();
     let manifest_path = root.join("Cargo.toml");
     let mut manifest = fs::read_to_string(&manifest_path).unwrap();
@@ -133,14 +161,16 @@ fn lists_context_files_without_listing_skill_documents_or_assets() {
     assert_eq!(packages[0].version, "1.2.3");
 
     let package = installer.find_package("docs-provider").unwrap().unwrap();
-    let files = installer.list_context_files(&package).unwrap();
-    let paths: Vec<_> = files
-        .iter()
-        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
-        .collect();
+    let definitions = installer.list_context_definitions(&package).unwrap();
+    let names: Vec<_> = definitions.iter().map(Definition::display_name).collect();
     assert_eq!(
-        paths,
-        ["example.json", "getting-started.md", "reference/usage.md"]
+        names,
+        [
+            "example.json",
+            "getting-started.md",
+            "initial-gem-setup (skill)",
+            "reference/usage.md"
+        ]
     );
 }
 
@@ -157,9 +187,9 @@ fn installs_unfamiliar_context_types_alongside_skills() {
         fs::read_to_string(root.join(".agents/context/docs-provider/guide.md")).unwrap(),
         guide
     );
-    assert_eq!(list_skills(&installer, None).unwrap().len(), 1);
+    assert_eq!(skill_definitions(&installer, None).unwrap().len(), 1);
     assert_eq!(
-        install_skills(&installer, None, None).unwrap(),
+        install_context_and_skills(&installer, None).unwrap(),
         [format!("{INSTALLED_SKILL_NAME} (docs-provider)")]
     );
     assert!(
@@ -174,7 +204,7 @@ fn installs_unfamiliar_context_types_alongside_skills() {
 fn discovers_and_installs_skills_declared_in_yaml_frontmatter() {
     let (_directory, root) = project();
     let installer = Installer::discover(&root).unwrap();
-    let skills = list_skills(&installer, None).unwrap();
+    let skills = skill_definitions(&installer, None).unwrap();
 
     assert_eq!(skills.len(), 1);
     assert_eq!(skills[0].name, INSTALLED_SKILL_NAME);
@@ -185,12 +215,7 @@ fn discovers_and_installs_skills_declared_in_yaml_frontmatter() {
     );
 
     assert_eq!(
-        install_skills(
-            &installer,
-            Some("docs-provider"),
-            Some(INSTALLED_SKILL_NAME)
-        )
-        .unwrap(),
+        install_context_and_skills(&installer, Some("docs-provider")).unwrap(),
         [format!("{INSTALLED_SKILL_NAME} (docs-provider)")]
     );
 
@@ -207,7 +232,6 @@ fn discovers_and_installs_skills_declared_in_yaml_frontmatter() {
     assert!(skill_markdown.contains("  ecosystem: cargo"));
     assert!(skill_markdown.contains("  package: docs-provider"));
     assert!(skill_markdown.contains("  version: 1.2.3"));
-    assert!(!skill_directory.join("skill.json").exists());
     assert!(skill_markdown.contains("# Initial Gem Setup"));
     assert_eq!(
         fs::read_to_string(skill_directory.join("references/checklist.md")).unwrap(),
@@ -224,7 +248,7 @@ fn discovers_and_installs_skills_declared_in_yaml_frontmatter() {
         "context/initial-gem-setup/references/checklist.md",
         "Updated checklist.\n",
     );
-    install_skills(&installer, None, None).unwrap();
+    install_context_and_skills(&installer, None).unwrap();
     assert_eq!(
         fs::read_to_string(skill_directory.join("references/checklist.md")).unwrap(),
         "Updated checklist.\n"
@@ -236,7 +260,11 @@ fn discovers_and_installs_skills_declared_in_yaml_frontmatter() {
             .join("provider/context/initial-gem-setup.md"),
     )
     .unwrap();
-    assert!(install_skills(&installer, None, None).unwrap().is_empty());
+    assert!(
+        install_context_and_skills(&installer, None)
+            .unwrap()
+            .is_empty()
+    );
     assert!(!skill_directory.exists());
     let exclude = fs::read_to_string(root.join(".git/info/exclude")).unwrap();
     assert!(!exclude.contains(&format!("/.agents/skills/{INSTALLED_SKILL_NAME}/")));
@@ -276,7 +304,7 @@ fn names_the_usage_skill_from_its_file_and_package() {
     );
 
     let installer = Installer::discover(&root).unwrap();
-    let skills = list_skills(&installer, None).unwrap();
+    let skills = skill_definitions(&installer, None).unwrap();
     let usage = skills
         .iter()
         .find(|skill| skill.name == "bake-agent-context-usage")
@@ -298,7 +326,7 @@ fn skill_installation_does_not_overwrite_project_owned_skills() {
     );
     let installer = Installer::discover(&root).unwrap();
 
-    let error = install_skills(&installer, None, None).unwrap_err();
+    let error = install_context_and_skills(&installer, None).unwrap_err();
     assert!(
         error
             .to_string()
@@ -328,7 +356,7 @@ fn maintains_local_excludes_without_hiding_project_owned_skills() {
     write(&root, ".git/info/exclude", "# Local user rule\n*.local\n");
     let installer = Installer::discover(&root).unwrap();
 
-    install_skills(&installer, None, None).unwrap();
+    install_context_and_skills(&installer, None).unwrap();
 
     let actual_gitignore = fs::read_to_string(root.join(".gitignore")).unwrap();
     let exclude = fs::read_to_string(root.join(".git/info/exclude")).unwrap();
@@ -374,7 +402,7 @@ fn maintains_local_excludes_without_hiding_project_owned_skills() {
         .unwrap();
     assert_eq!(project_skill.code(), Some(1));
 
-    install_skills(&installer, None, None).unwrap();
+    install_context_and_skills(&installer, None).unwrap();
     assert_eq!(
         fs::read_to_string(root.join(".git/info/exclude")).unwrap(),
         exclude
@@ -391,7 +419,7 @@ fn skill_installation_works_without_a_git_checkout() {
     fs::remove_dir_all(root.join(".git")).unwrap();
     let installer = Installer::discover(&root).unwrap();
 
-    install_skills(&installer, None, None).unwrap();
+    install_context_and_skills(&installer, None).unwrap();
 
     assert!(
         root.join(".agents/skills")
@@ -403,14 +431,8 @@ fn skill_installation_works_without_a_git_checkout() {
 }
 
 #[test]
-fn installs_context_and_skills_without_changing_agents_file() {
+fn installs_context_and_skills() {
     let (_directory, root) = project();
-    write(
-        &root,
-        "agents.md",
-        "# Agent\n\nProject-specific introduction.\n\n## Context\n\nOld generated section.\n\n## Commands\n\nKeep this section.\n",
-    );
-
     let output = Registry::discover()
         .unwrap()
         .run_arguments(&root, &["agent:context:install".to_owned()])
@@ -425,23 +447,12 @@ fn installs_context_and_skills_without_changing_agents_file() {
         fs::read_to_string(installed.join("reference/usage.md")).unwrap(),
         "# Usage\n\nNested usage guidance.\n"
     );
-    assert!(!installed.join("index.yaml").exists());
-    assert!(!installed.join("initial-gem-setup.md").exists());
-    assert!(!installed.join("initial-gem-setup").exists());
     assert!(
         root.join(".agents/skills")
             .join(INSTALLED_SKILL_NAME)
             .join("SKILL.md")
             .is_file()
     );
-
-    let agents_file = fs::read_to_string(root.join("agents.md")).unwrap();
-    assert_eq!(
-        agents_file,
-        "# Agent\n\nProject-specific introduction.\n\n## Context\n\nOld generated section.\n\n## Commands\n\nKeep this section.\n"
-    );
-
-    assert!(!root.join(".agents/context/index.md").exists());
 }
 
 #[test]
@@ -459,7 +470,7 @@ fn copies_ordinary_document_metadata_without_interpreting_descriptions() {
             .as_deref(),
         Some(guide)
     );
-    installer.install_all().unwrap();
+    installer.install(None).unwrap();
     assert_eq!(
         fs::read_to_string(root.join(".agents/context/docs-provider/guide.md")).unwrap(),
         guide
@@ -496,7 +507,6 @@ fn context_only_installation_updates_git_exclusions() {
             .unwrap()
             .success()
     );
-    assert!(!root.join(".agents/context/index.md").exists());
 }
 
 #[test]
@@ -512,7 +522,7 @@ fn installs_documents_without_headings_and_omits_empty_directories() {
 
     let installer = Installer::discover(&root).unwrap();
     assert_eq!(installer.context_path(), root.join(".agents/context"));
-    assert_eq!(installer.install_all().unwrap(), ["docs-provider"]);
+    assert_eq!(installer.install(None).unwrap().context, ["docs-provider"]);
     assert!(
         !root
             .join(".agents/context/docs-provider/empty-directory")
@@ -574,11 +584,11 @@ fn discovers_multiple_context_providers_and_orders_their_skills() {
         ["docs-provider", "second-provider"]
     );
     assert_eq!(
-        installer.install_all().unwrap(),
+        installer.install(None).unwrap().context,
         ["docs-provider", "second-provider"]
     );
 
-    let skills = list_skills(&installer, None).unwrap();
+    let skills = skill_definitions(&installer, None).unwrap();
     assert_eq!(
         skills
             .iter()
@@ -587,7 +597,7 @@ fn discovers_multiple_context_providers_and_orders_their_skills() {
         ["docs-provider-initial-gem-setup", "second-provider-release"]
     );
     assert_eq!(
-        install_skills(&installer, None, None).unwrap(),
+        install_context_and_skills(&installer, None).unwrap(),
         [
             "docs-provider-initial-gem-setup (docs-provider)",
             "second-provider-release (second-provider)"
@@ -606,7 +616,7 @@ fn sorts_skills_within_a_provider_by_name() {
     );
 
     let installer = Installer::discover(&root).unwrap();
-    let skills = list_skills(&installer, None).unwrap();
+    let skills = skill_definitions(&installer, None).unwrap();
     let names: Vec<_> = skills.iter().map(|skill| skill.name.as_str()).collect();
     assert_eq!(
         names,
@@ -618,7 +628,7 @@ fn sorts_skills_within_a_provider_by_name() {
 }
 
 #[test]
-fn selecting_one_skill_keeps_other_installed_skills() {
+fn installing_one_provider_refreshes_all_of_its_skills() {
     let (_directory, root) = project();
     let provider = root.parent().unwrap().join("provider");
     write(
@@ -628,27 +638,23 @@ fn selecting_one_skill_keeps_other_installed_skills() {
     );
     let installer = Installer::discover(&root).unwrap();
 
-    install_skills(&installer, None, None).unwrap();
+    install_context_and_skills(&installer, None).unwrap();
     assert_eq!(
-        install_skills(
-            &installer,
-            Some("docs-provider"),
-            Some(INSTALLED_SKILL_NAME)
-        )
-        .unwrap(),
-        [format!("{INSTALLED_SKILL_NAME} (docs-provider)")]
+        installer.install(Some("docs-provider")).unwrap().skills,
+        [
+            format!("{INSTALLED_SKILL_NAME} (docs-provider)"),
+            "docs-provider-secondary (docs-provider)".to_owned()
+        ]
     );
-    assert!(install_skills(&installer, None, Some("missing-skill")).is_err());
     fs::remove_file(provider.join("context/secondary.md")).unwrap();
     assert_eq!(
-        install_skills(&installer, None, Some(INSTALLED_SKILL_NAME)).unwrap(),
+        installer.install(None).unwrap().skills,
         [format!("{INSTALLED_SKILL_NAME} (docs-provider)")]
     );
 
     let skills_root = root.join(".agents/skills");
-    assert!(skills_root.join("docs-provider-secondary").is_dir());
-    let owner = fs::read_to_string(skills_root.join("docs-provider-secondary/SKILL.md")).unwrap();
-    assert!(owner.contains("docs-provider"));
+    assert!(!skills_root.join("docs-provider-secondary").exists());
+    assert!(skills_root.join(INSTALLED_SKILL_NAME).is_dir());
 }
 
 #[cfg(unix)]
@@ -663,7 +669,7 @@ fn reports_ownership_read_and_skill_directory_creation_errors() {
     );
     fs::set_permissions(&ownership_path, fs::Permissions::from_mode(0o000)).unwrap();
     let installer = Installer::discover(&root).unwrap();
-    let error = install_skills(&installer, None, None)
+    let error = install_context_and_skills(&installer, None)
         .unwrap_err()
         .to_string();
     fs::set_permissions(&ownership_path, fs::Permissions::from_mode(0o600)).unwrap();
@@ -674,7 +680,7 @@ fn reports_ownership_read_and_skill_directory_creation_errors() {
     fs::create_dir_all(&agents_directory).unwrap();
     fs::set_permissions(&agents_directory, fs::Permissions::from_mode(0o555)).unwrap();
     let installer = Installer::discover(&root).unwrap();
-    let error = install_skills(&installer, None, None)
+    let error = install_context_and_skills(&installer, None)
         .unwrap_err()
         .to_string();
     fs::set_permissions(&agents_directory, fs::Permissions::from_mode(0o755)).unwrap();
@@ -694,7 +700,7 @@ fn reports_context_removal_errors_without_overwriting_existing_files() {
     fs::set_permissions(&context_root, fs::Permissions::from_mode(0o555)).unwrap();
 
     let installer = Installer::discover(&root).unwrap();
-    let result = installer.install_package("docs-provider");
+    let result = installer.install(Some("docs-provider"));
     fs::set_permissions(&context_root, fs::Permissions::from_mode(0o755)).unwrap();
 
     let error = result.unwrap_err().to_string();
@@ -708,18 +714,18 @@ fn validates_skill_documents_through_the_dependency_build() {
     let installer = Installer::discover(&root).unwrap();
 
     assert_eq!(
-        list_skills(&installer, Some("docs-provider"))
+        skill_definitions(&installer, Some("docs-provider"))
             .unwrap()
             .len(),
         1
     );
     assert!(
-        list_skills(&installer, Some("missing-provider"))
+        skill_definitions(&installer, Some("missing-provider"))
             .unwrap()
             .is_empty()
     );
     assert!(
-        install_skills(&installer, Some("missing-provider"), None)
+        install_context_and_skills(&installer, Some("missing-provider"))
             .unwrap_err()
             .to_string()
             .contains("no context found")
@@ -731,7 +737,7 @@ fn validates_skill_documents_through_the_dependency_build() {
         "---\nmetadata:\n  type: skill\ndescription: Another skill.\n---\n\n# Another Skill\n",
     );
     assert_eq!(
-        list_skills(&installer, Some("docs-provider"))
+        skill_definitions(&installer, Some("docs-provider"))
             .unwrap()
             .len(),
         2
@@ -764,14 +770,14 @@ fn validates_skill_documents_through_the_dependency_build() {
     ] {
         write(&provider, name, contents);
         assert!(
-            list_skills(&installer, None)
+            skill_definitions(&installer, None)
                 .unwrap_err()
                 .to_string()
                 .contains(message),
             "{name}"
         );
         assert!(
-            install_skills(&installer, Some("docs-provider"), None)
+            install_context_and_skills(&installer, Some("docs-provider"))
                 .unwrap_err()
                 .to_string()
                 .contains(message),
@@ -786,13 +792,13 @@ fn validates_skill_documents_through_the_dependency_build() {
         "---\nmetadata:\n  type: skill\ndescription: Nested.\n---\n\n# Skill\n",
     );
     assert!(
-        list_skills(&installer, None)
+        skill_definitions(&installer, None)
             .unwrap_err()
             .to_string()
             .contains("directly inside context")
     );
     assert!(
-        install_skills(&installer, Some("docs-provider"), None)
+        install_context_and_skills(&installer, Some("docs-provider"))
             .unwrap_err()
             .to_string()
             .contains("directly inside context")
@@ -806,13 +812,13 @@ fn validates_skill_documents_through_the_dependency_build() {
     );
     write(&provider, "blocked", "not a directory");
     assert!(
-        list_skills(&installer, None)
+        skill_definitions(&installer, None)
             .unwrap_err()
             .to_string()
             .contains("is not a directory")
     );
     assert!(
-        install_skills(&installer, Some("docs-provider"), None)
+        install_context_and_skills(&installer, Some("docs-provider"))
             .unwrap_err()
             .to_string()
             .contains("is not a directory")
@@ -831,7 +837,7 @@ fn rejects_non_regular_skill_assets_in_the_dependency_build() {
     let target = root.join("asset-target.txt");
     fs::write(&target, "target").unwrap();
     symlink(&target, assets.join("link")).unwrap();
-    let error = install_skills(&Installer::discover(&root).unwrap(), None, None)
+    let error = install_context_and_skills(&Installer::discover(&root).unwrap(), None)
         .unwrap_err()
         .to_string();
     assert!(error.contains("cannot contain symbolic links"), "{error}");
@@ -843,7 +849,7 @@ fn rejects_non_regular_skill_assets_in_the_dependency_build() {
         "Reserved skill asset.\n",
     )
     .unwrap();
-    let error = install_skills(&Installer::discover(&root).unwrap(), None, None)
+    let error = install_context_and_skills(&Installer::discover(&root).unwrap(), None)
         .unwrap_err()
         .to_string();
     assert!(
@@ -856,7 +862,7 @@ fn rejects_non_regular_skill_assets_in_the_dependency_build() {
     let socket_path = provider.join("context/initial-gem-setup/socket");
     let status = Command::new("mkfifo").arg(&socket_path).status().unwrap();
     assert!(status.success(), "mkfifo failed: {status}");
-    let error = install_skills(&Installer::discover(&root).unwrap(), None, None)
+    let error = install_context_and_skills(&Installer::discover(&root).unwrap(), None)
         .unwrap_err()
         .to_string();
     assert!(error.contains("unsupported skill asset"), "{error}");
@@ -872,7 +878,7 @@ fn preserves_the_original_body_without_a_final_newline() {
         "---\nmetadata:\n  type: skill\ndescription: A skill without a final newline.\n---\n\n# No Final Newline",
     );
 
-    install_skills(&Installer::discover(&root).unwrap(), None, None).unwrap();
+    install_context_and_skills(&Installer::discover(&root).unwrap(), None).unwrap();
     let installed =
         fs::read_to_string(root.join(".agents/skills/docs-provider-no-final-newline/SKILL.md"))
             .unwrap();
@@ -887,7 +893,7 @@ fn reports_public_installer_and_cargo_metadata_errors() {
     let blocked = root.join(".agents/context");
     fs::write(&blocked, "not a directory").unwrap();
     let error = installer
-        .install_package("docs-provider")
+        .install(Some("docs-provider"))
         .unwrap_err()
         .to_string();
     assert!(error.contains(&blocked.display().to_string()), "{error}");
@@ -911,7 +917,7 @@ fn rejects_invalid_skill_ownership_and_installation_paths() {
     fs::write(&skills_root, "not a directory").unwrap();
     let installer = Installer::discover(&root).unwrap();
     assert!(
-        install_skills(&installer, None, None)
+        install_context_and_skills(&installer, None)
             .unwrap_err()
             .to_string()
             .contains("not a regular directory")
@@ -926,7 +932,7 @@ fn rejects_invalid_skill_ownership_and_installation_paths() {
         "---\nmetadata: [invalid\n---\n",
     );
     assert!(
-        install_skills(&installer, None, None)
+        install_context_and_skills(&installer, None)
             .unwrap_err()
             .to_string()
             .contains("invalid YAML front matter")
@@ -938,7 +944,7 @@ fn rejects_invalid_skill_ownership_and_installation_paths() {
     )
     .unwrap();
     assert!(
-        install_skills(&installer, None, None)
+        install_context_and_skills(&installer, None)
             .unwrap_err()
             .to_string()
             .contains("invalid skill ownership")
@@ -965,17 +971,13 @@ fn show_supports_implicit_markdown_extension_and_rejects_parent_paths() {
 }
 
 #[test]
-fn registers_the_ruby_compatible_task_names() {
+fn registers_the_context_task_names() {
     let registry = Registry::discover().unwrap();
     let names: Vec<_> = registry.tasks().map(|task| task.name()).collect();
 
     assert!(names.contains(&"agent:context:list"));
     assert!(names.contains(&"agent:context:show"));
     assert!(names.contains(&"agent:context:install"));
-    assert!(!names.contains(&"agent:context:index"));
-    assert!(!names.contains(&"agent:context:agents-md"));
-    assert!(names.contains(&"agent:context:skill:list"));
-    assert!(names.contains(&"agent:context:skill:install"));
 }
 
 #[test]
@@ -987,19 +989,6 @@ fn bake_tasks_cover_context_and_skill_lookup_and_installation() {
         .run_arguments(&root, &["agent:context:list".to_owned()])
         .unwrap();
     assert!(output.contains("Crates with context available:"));
-
-    let output = Registry::discover()
-        .unwrap()
-        .run_arguments(
-            &root,
-            &[
-                "agent:context:list".to_owned(),
-                "::".to_owned(),
-                "agent:context:skill:list".to_owned(),
-            ],
-        )
-        .unwrap();
-    assert!(output.contains(INSTALLED_SKILL_NAME));
 
     let output = Registry::discover()
         .unwrap()
@@ -1026,6 +1015,7 @@ fn bake_tasks_cover_context_and_skill_lookup_and_installation() {
         )
         .unwrap();
     assert!(output.contains("getting-started.md"));
+    assert!(output.contains("initial-gem-setup (skill)"));
 
     let output = Registry::discover()
         .unwrap()
@@ -1062,6 +1052,21 @@ fn bake_tasks_cover_context_and_skill_lookup_and_installation() {
         .run_arguments(
             &root,
             &[
+                "agent:context:show".to_owned(),
+                "--package".to_owned(),
+                "docs-provider".to_owned(),
+                "--file".to_owned(),
+                "initial-gem-setup".to_owned(),
+            ],
+        )
+        .unwrap();
+    assert!(output.contains("Create the gem files and verify the package."));
+
+    let output = Registry::discover()
+        .unwrap()
+        .run_arguments(
+            &root,
+            &[
                 "agent:context:install".to_owned(),
                 "--package".to_owned(),
                 "docs-provider".to_owned(),
@@ -1069,49 +1074,7 @@ fn bake_tasks_cover_context_and_skill_lookup_and_installation() {
         )
         .unwrap();
     assert!(output.contains("Installed context from: docs-provider"));
-
-    let output = Registry::discover()
-        .unwrap()
-        .run_arguments(
-            &root,
-            &[
-                "agent:context:skill:list".to_owned(),
-                "--package".to_owned(),
-                "missing".to_owned(),
-            ],
-        )
-        .unwrap();
-    assert_eq!(output.trim_end(), "No dependency skills found");
-
-    let output = Registry::discover()
-        .unwrap()
-        .run_arguments(
-            &root,
-            &[
-                "agent:context:skill:install".to_owned(),
-                "--package".to_owned(),
-                "docs-provider".to_owned(),
-                "--skill".to_owned(),
-                INSTALLED_SKILL_NAME.to_owned(),
-            ],
-        )
-        .unwrap();
-    assert!(output.contains(INSTALLED_SKILL_NAME));
-    assert!(
-        Registry::discover()
-            .unwrap()
-            .run_arguments(
-                &root,
-                &[
-                    "agent:context:skill:install".to_owned(),
-                    "--skill".to_owned(),
-                    "missing".to_owned(),
-                ],
-            )
-            .is_err()
-    );
-
-    assert!(!root.join(".agents/context/index.md").exists());
+    assert!(output.contains("Installed skills: docs-provider-initial-gem-setup"));
 }
 
 #[test]
@@ -1130,28 +1093,11 @@ fn bake_tasks_report_empty_context_and_skill_sets() {
     assert_eq!(
         Registry::discover()
             .unwrap()
-            .run_arguments(&root, &["agent:context:skill:list".to_owned()])
-            .unwrap()
-            .trim_end(),
-        "No dependency skills found"
-    );
-    assert_eq!(
-        Registry::discover()
-            .unwrap()
             .run_arguments(&root, &["agent:context:install".to_owned()])
             .unwrap()
             .trim_end(),
         "No dependency context or skills were installed"
     );
-    assert_eq!(
-        Registry::discover()
-            .unwrap()
-            .run_arguments(&root, &["agent:context:skill:install".to_owned()])
-            .unwrap()
-            .trim_end(),
-        "No dependency skills were installed"
-    );
-    assert!(!root.join(".agents/context/index.md").exists());
 }
 
 #[test]
@@ -1173,7 +1119,7 @@ fn tasks_distinguish_skill_only_dependencies_from_missing_context() {
             ],
         )
         .unwrap();
-    assert!(output.contains("No context files found for crate 'docs-provider'."));
+    assert!(output.contains("initial-gem-setup (skill)"));
 
     let output = Registry::discover()
         .unwrap()

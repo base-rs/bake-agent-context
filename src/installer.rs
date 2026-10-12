@@ -2,6 +2,7 @@
 // Copyright, 2026, by Samuel Williams.
 
 use super::package_context::PackageContext;
+use super::skill::Skill;
 #[cfg(test)]
 use super::test_filesystem as fs;
 use bake::{Error, Result};
@@ -42,10 +43,50 @@ impl ContextPackage {
     }
 }
 
-/// A context file relative to its provider's `context/` directory.
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// An ordinary file loaded from a provider's `context/` directory.
+#[derive(Clone, Debug)]
 pub struct ContextFile {
+    /// The path relative to the provider's `context/` directory.
     pub path: PathBuf,
+    pub(crate) source: PathBuf,
+    pub(crate) document: Option<super::document::ContextDocument>,
+}
+
+/// One loaded ordinary context file or skill definition.
+#[derive(Clone, Debug)]
+pub enum Definition {
+    File(ContextFile),
+    Skill(Skill),
+}
+
+impl Definition {
+    /// The name shown by `agent:context:list`.
+    pub fn display_name(&self) -> String {
+        match self {
+            Self::File(file) => file.path.display().to_string(),
+            Self::Skill(skill) => format!("{} (skill)", skill.source_name),
+        }
+    }
+
+    /// Whether the definition installs as an Agent Skill.
+    pub fn is_skill(&self) -> bool {
+        matches!(self, Self::Skill(_))
+    }
+}
+
+impl ContextFile {
+    fn content(&self) -> Result<String> {
+        if let Some(document) = &self.document {
+            return Ok(document.content.clone());
+        }
+
+        read_context_file(&self.source)?.ok_or_else(|| {
+            Error::new(format!(
+                "context file {} was not found",
+                self.source.display()
+            ))
+        })
+    }
 }
 
 /// The provider and skill names refreshed by an installation.
@@ -200,19 +241,10 @@ impl Installer {
         }
     }
 
-    /// List ordinary context from one loaded provider.
-    pub fn list_context_files(&self, package: &ContextPackage) -> Result<Vec<ContextFile>> {
+    /// Load every ordinary context and skill definition from one provider.
+    pub fn list_context_definitions(&self, package: &ContextPackage) -> Result<Vec<Definition>> {
         let context = PackageContext::load(package)?;
-        Ok(context
-            .files
-            .keys()
-            .map(|path| ContextFile {
-                path: path
-                    .strip_prefix(&package.context_path)
-                    .expect("context files belong to their package")
-                    .to_owned(),
-            })
-            .collect())
+        Ok(context.definitions)
     }
 
     /// Show an ordinary document or opaque resource from a provider.
@@ -220,38 +252,41 @@ impl Installer {
         let Some(package) = self.find_package(selector)? else {
             return Ok(None);
         };
-        let Some((root, path)) = find_context_file_with_root(&package.context_path, file)? else {
+        let selected_file = find_context_file_with_root(&package.context_path, file)?;
+        let context = PackageContext::load(&package)?;
+
+        // Skills are shown by their installed name through the same task:
+        if let Some(skill) = context
+            .definitions
+            .iter()
+            .find_map(|definition| match definition {
+                Definition::Skill(skill)
+                    if skill.name == file
+                        || skill.source_name == file
+                        || format!("{}.md", skill.source_name) == file =>
+                {
+                    Some(skill)
+                }
+                _ => None,
+            })
+        {
+            return Ok(Some(skill.content().to_owned()));
+        }
+
+        let Some((root, path)) = selected_file else {
             return Ok(None);
         };
-        let context = PackageContext::load(&package)?;
         let relative = path
             .strip_prefix(root)
             .expect("resolved context paths stay within their root");
-        match context.files.get(&package.context_path.join(relative)) {
-            Some(Some(document)) => Ok(Some(document.content.clone())),
-            Some(None) => read_context_file(&path),
-            None => Ok(None),
-        }
-    }
-
-    /// Refresh ordinary context for one provider.
-    pub fn install_package(&self, selector: &str) -> Result<bool> {
-        let Some(package) = self.find_package(selector)? else {
-            return Ok(false);
-        };
-        PackageContext::load(&package)?
-            .install(&package, &self.context_path.join(package.selector()))
-    }
-
-    /// Refresh ordinary context for every resolved provider.
-    pub fn install_all(&self) -> Result<Vec<String>> {
-        let mut installed = Vec::new();
-        for package in &self.packages {
-            if self.install_package(package.selector())? {
-                installed.push(package.selector().to_owned());
-            }
-        }
-        Ok(installed)
+        let definition = context
+            .definitions
+            .iter()
+            .find_map(|definition| match definition {
+                Definition::File(file) if file.path == relative => Some(file),
+                _ => None,
+            });
+        definition.map(ContextFile::content).transpose()
     }
 
     /// Install context and skills from the same loaded provider documents.
@@ -271,21 +306,28 @@ impl Installer {
             .collect::<Result<Vec<_>>>()?;
         let definitions: Vec<_> = loaded
             .iter()
-            .flat_map(|(_, context)| context.skills.clone())
+            .flat_map(|(_, context)| context.definitions.iter())
+            .filter_map(|definition| match definition {
+                Definition::Skill(skill) => Some(skill.clone()),
+                Definition::File(_) => None,
+            })
             .collect();
         let package = selector
             .and_then(|_| packages.first())
             .map(|package| package.name.as_str());
 
-        // Refresh skills and ordinary files from those loaded representations:
+        // Apply skill installation rules, then write ordinary definitions:
         let skills = super::skill::install_definitions(&self.root, &definitions, package, true)?;
-        let mut context = Vec::new();
-        for (package, files) in loaded {
-            if files.install(package, &self.context_path.join(package.selector()))? {
-                context.push(package.selector().to_owned());
+        let mut context_names = Vec::new();
+        for (package, definitions) in loaded {
+            if definitions.install(&self.context_path.join(package.selector()))? {
+                context_names.push(package.selector().to_owned());
             }
         }
-        Ok(Installation { context, skills })
+        Ok(Installation {
+            context: context_names,
+            skills,
+        })
     }
 }
 
@@ -734,11 +776,11 @@ mod tests {
         );
         assert!(
             installer
-                .show_context_file("provider", "workflow")
+                .show_context_file("provider", "provider-workflow")
                 .unwrap()
-                .is_none()
+                .unwrap()
+                .contains("Workflow.")
         );
-        assert!(!installer.install_package("missing").unwrap());
         assert!(
             installer
                 .install(Some("missing"))
@@ -753,12 +795,15 @@ mod tests {
         assert_eq!(loaded.skills, ["provider-workflow (provider@1.0.0)"]);
         fs::remove_file(context.join("guide.md")).unwrap();
         fs::remove_file(context.join("data.txt")).unwrap();
-        assert!(installer.install_all().unwrap().is_empty());
+        assert!(installer.install(None).unwrap().context.is_empty());
         assert!(installer.install(None).unwrap().context.is_empty());
         fs::write(context.join("broken.md"), "---\n[invalid\n---\n").unwrap();
-        assert!(installer.show_context_file("provider", "workflow").is_err());
-        assert!(installer.install_package("provider").is_err());
-        assert!(installer.install_all().is_err());
+        assert!(
+            installer
+                .show_context_file("provider", "provider-workflow")
+                .is_err()
+        );
+        assert!(installer.install(Some("provider")).is_err());
     }
 
     #[test]

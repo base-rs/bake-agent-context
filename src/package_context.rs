@@ -2,28 +2,25 @@
 // Copyright, 2026, by Samuel Williams.
 
 use super::document::ContextDocument;
-use super::installer::ContextPackage;
+use super::installer::{ContextFile, ContextPackage, Definition};
 use super::skill::Skill;
 #[cfg(test)]
 use super::test_filesystem as fs;
 use bake::{Error, Result};
-use std::collections::BTreeMap;
 #[cfg(not(test))]
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-/// Loaded ordinary context and skills from one resolved provider.
+/// Loaded definitions from one resolved provider.
 pub(crate) struct PackageContext {
-    pub(crate) files: BTreeMap<PathBuf, Option<ContextDocument>>,
-    pub(crate) skills: Vec<Skill>,
+    pub(crate) definitions: Vec<Definition>,
 }
 
 impl PackageContext {
     /// Classify root documents before descending into companion resource directories.
     pub(crate) fn load(package: &ContextPackage) -> Result<Self> {
         let mut context = Self {
-            files: BTreeMap::new(),
-            skills: Vec::new(),
+            definitions: Vec::new(),
         };
         context.load_directory(package, &package.context_path)?;
         Ok(context)
@@ -52,52 +49,67 @@ impl PackageContext {
                 if let Some(document) = document.as_ref()
                     && document.is_skill()
                 {
-                    self.skills.push(Skill::from_document(package, document)?);
+                    self.definitions
+                        .push(Definition::Skill(Skill::from_document(package, document)?));
                 } else {
-                    self.files.insert(path, document);
+                    let relative = path
+                        .strip_prefix(&package.context_path)
+                        .expect("context files belong to their package")
+                        .to_owned();
+                    self.definitions.push(Definition::File(ContextFile {
+                        path: relative,
+                        source: path,
+                        document,
+                    }));
                 }
             }
         }
 
         // Companion resources belong to the skill and remain opaque:
         for directory in directories {
-            if !self
-                .skills
-                .iter()
-                .any(|skill| directory == package.context_path.join(&skill.source_name))
-            {
+            if !self.definitions.iter().any(|definition| match definition {
+                Definition::Skill(skill) => {
+                    directory == package.context_path.join(&skill.source_name)
+                }
+                Definition::File(_) => false,
+            }) {
                 self.load_directory(package, &directory)?;
             }
         }
-        self.skills
-            .sort_by(|left, right| left.name.cmp(&right.name));
+        self.definitions.sort_by_key(Definition::display_name);
         Ok(())
     }
 
-    /// Refresh ordinary context from loaded Markdown and opaque resources.
-    pub(crate) fn install(&self, package: &ContextPackage, destination: &Path) -> Result<bool> {
+    /// Refresh ordinary definitions from loaded Markdown and opaque resources.
+    pub(crate) fn install(&self, destination: &Path) -> Result<bool> {
         super::installer::remove_existing(destination)?;
-        for (source, document) in &self.files {
-            let relative = source
-                .strip_prefix(&package.context_path)
-                .expect("context files belong to their package");
-            let target = destination.join(relative);
+        let files: Vec<_> = self
+            .definitions
+            .iter()
+            .filter_map(|definition| match definition {
+                Definition::File(file) => Some(file),
+                Definition::Skill(_) => None,
+            })
+            .collect();
+
+        for file in &files {
+            let target = destination.join(&file.path);
             fs::create_dir_all(target.parent().unwrap()).map_err(|error| {
                 Error::new(format!("cannot create {}: {error}", target.display()))
             })?;
-            if let Some(document) = document {
+            if let Some(document) = &file.document {
                 document.write(&target)?;
             } else {
-                fs::copy(source, &target).map_err(|error| {
+                fs::copy(&file.source, &target).map_err(|error| {
                     Error::new(format!(
                         "cannot copy {} to {}: {error}",
-                        source.display(),
+                        file.source.display(),
                         target.display()
                     ))
                 })?;
             }
         }
-        Ok(!self.files.is_empty())
+        Ok(!files.is_empty())
     }
 }
 
@@ -121,7 +133,7 @@ mod tests {
         let loaded = PackageContext::load(&package).unwrap();
         fs::write(source.join("guide.md"), "# Changed\n").unwrap();
         let destination = directory.path().join("installed");
-        loaded.install(&package, &destination).unwrap();
+        loaded.install(&destination).unwrap();
         assert_eq!(
             fs::read_to_string(destination.join("guide.md")).unwrap(),
             "# Original\n"
@@ -136,7 +148,7 @@ mod tests {
             let _failure = fail_once(operation, move |candidate| candidate == path);
             assert!(
                 loaded
-                    .install(&package, &destination)
+                    .install(&destination)
                     .unwrap_err()
                     .to_string()
                     .contains("injected filesystem failure")

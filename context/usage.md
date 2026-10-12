@@ -12,11 +12,11 @@ Use Bake Agent Context to discover and install practical guidance shipped in dep
 
 Context providers store agent-focused documentation in a `context/` directory at the root of their crate. Bake Agent Context scans resolved Cargo dependencies for this directory.
 
-Run `cargo bake agent:context:list` to see available providers. Each provider is listed by crate name and version. If multiple versions of one crate provide context, select the desired version using the `crate@version` selector shown by the task.
+Run `cargo bake agent:context:list` to see available providers. Each provider is listed by crate name and version. If multiple versions of one crate provide context, select the desired version using the `crate@version` selector shown by the task. A provider's list marks skill documents with `(skill)`.
 
-Run `cargo bake agent:context:list --package CRATE` to list one provider's files. Read a file without installing it using `cargo bake agent:context:show --package CRATE --file FILE`; the `.md` extension is optional for Markdown files. Install or refresh one provider with `cargo bake agent:context:install --package CRATE`.
+Run `cargo bake agent:context:list --package CRATE` to list one provider's definitions. Read a guide or skill without installing it using `cargo bake agent:context:show --package CRATE --file FILE`; the `.md` extension is optional for Markdown files. Install or refresh one provider with `cargo bake agent:context:install --package CRATE`.
 
-Run `cargo bake agent:context:install` to install or refresh context from all resolved dependencies. Files are copied under `.agents/context/SELECTOR/`, where the selector is the crate name or the displayed `crate@version` selector. Discover installed Markdown files with `rg --files --hidden --no-ignore .agents/context -g "*.md"`, then read the guides relevant to the task. Install missing guidance and refresh it after changing dependencies.
+Run `cargo bake agent:context:install` to install or refresh context and skills from all resolved dependencies. Ordinary files are copied under `.agents/context/SELECTOR/`, where the selector is the crate name or the displayed `crate@version` selector. Discover installed Markdown files with `rg --files --hidden --no-ignore .agents/context -g "*.md"`, then read the guides relevant to the task. Install missing guidance and refresh it after changing dependencies.
 
 The `.agents/context/` directory contains installed dependency copies. In a Git checkout, the install task maintains a marked block in `.git/info/exclude` for that directory and exact dependency-installed skill directories. Project-owned skill directories remain trackable. Repository instructions can direct agents to discover and read the installed guides. Edit provider sources and reinstall to update dependency copies.
 
@@ -68,7 +68,7 @@ Bake preserves an authored `name` and uses it for the installed directory. When 
 
 The required skill front matter fields are `metadata.type: skill` and a non-empty `description`. Other types install as ordinary context. Additional metadata is preserved in the generated skill. Skill resources are copied without parsing their Markdown front matter. There is no portable file-pattern field for skills, so describe the relevant tasks and files in `description`.
 
-Run `cargo bake agent:context:install` to install ordinary context and all discovered skills. Use `--package CRATE` to install both from one provider. For independent skill management, `cargo bake agent:context:skill:install` installs all skills by default; `--package CRATE` selects one provider, `--skill NAME` selects one uniquely named skill using its installed name, and both select a skill from a specific crate. Run `cargo bake agent:context:skill:list` to discover available skills.
+Run `cargo bake agent:context:install` to install ordinary context and all discovered skills. Use `--package CRATE` to install both from one provider. The same list, show, and install tasks handle both ordinary context and skills.
 
 Installed skills live under `.agents/skills/`. Bake records ownership there so it can update dependency-provided skills without overwriting project-owned skills. The installer adds exact entries to `.git/info/exclude` for dependency-owned skill directories; it does not ignore the whole `.agents/skills/` directory. Skill names are global within that directory. Authored names are preserved; missing names default to `<crate>-<filename>`. If multiple versions of one crate provide the same skill, select one provider explicitly. The top-level resource name `SKILL.md` is reserved for generated instructions.
 

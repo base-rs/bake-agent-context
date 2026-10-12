@@ -11,8 +11,8 @@ mod skill;
 #[cfg(test)]
 mod test_filesystem;
 
-pub use installer::{ContextFile, ContextPackage, Installation, Installer};
-pub use skill::{Skill, install_skills, list_skills};
+pub use installer::{ContextFile, ContextPackage, Definition, Installation, Installer};
+pub use skill::Skill;
 
 use bake::{Context, Error, Result};
 
@@ -26,7 +26,7 @@ fn installer(context: &mut Context) -> Result<Installer> {
     Ok(installer)
 }
 
-/// List dependency crates that ship context, or list one crate's context files.
+/// List dependency crates that ship context, or list one crate's definitions.
 #[bake::task(name = "agent:context:list")]
 pub fn list(context: &mut Context, package: Option<String>) -> Result<String> {
     let installer = installer(context)?;
@@ -36,23 +36,23 @@ pub fn list(context: &mut Context, package: Option<String>) -> Result<String> {
             return Ok(format!("No context found for crate '{package}'"));
         };
 
-        let files = installer.list_context_files(&package)?;
-        if files.is_empty() {
+        let definitions = installer.list_context_definitions(&package)?;
+        if definitions.is_empty() {
             return Ok(format!(
-                "No context files found for crate '{}'.",
+                "No context definitions found for crate '{}'.",
                 package.selector()
             ));
         }
         let mut output = format!("Context files for crate '{}':", package.selector());
-        for file in files {
-            output.push_str(&format!("\n  {}", file.path.display()));
+        for definition in definitions {
+            output.push_str(&format!("\n  {}", definition.display_name()));
         }
         return Ok(output);
     }
 
     let mut packages = Vec::new();
     for package in installer.packages() {
-        if !installer.list_context_files(package)?.is_empty() {
+        if !installer.list_context_definitions(package)?.is_empty() {
             packages.push(package);
         }
     }
@@ -109,43 +109,6 @@ pub fn install(context: &mut Context, package: Option<String>) -> Result<String>
     }
 }
 
-/// List skills declared by dependency context documents.
-#[bake::task(name = "agent:context:skill:list")]
-pub fn skill_list(context: &mut Context, package: Option<String>) -> Result<String> {
-    let installer = installer(context)?;
-    let skills = list_skills(&installer, package.as_deref())?;
-    if skills.is_empty() {
-        return Ok("No dependency skills found".to_owned());
-    }
-
-    let mut output = String::from("Available dependency skills:");
-    for skill in skills {
-        output.push_str(&format!(
-            "\n  {} ({}) — {}",
-            skill.name,
-            skill.package_selector(),
-            skill.description
-        ));
-    }
-    Ok(output)
-}
-
-/// Install skills from all dependencies or select a crate and/or installed skill name.
-#[bake::task(name = "agent:context:skill:install")]
-pub fn skill_install(
-    context: &mut Context,
-    package: Option<String>,
-    skill: Option<String>,
-) -> Result<String> {
-    let installer = installer(context)?;
-    let installed = install_skills(&installer, package.as_deref(), skill.as_deref())?;
-    if installed.is_empty() {
-        Ok("No dependency skills were installed".to_owned())
-    } else {
-        Ok(format!("Installed skills: {}", installed.join(", ")))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -190,8 +153,6 @@ mod tests {
         assert!(install(&mut context, None).is_err());
         assert!(show(&mut context, "provider".to_owned(), "missing.md".to_owned()).is_err());
         assert!(install(&mut context, Some("provider".to_owned())).is_err());
-        assert!(skill_list(&mut context, Some("provider".to_owned())).is_err());
-        assert!(skill_install(&mut context, Some("provider".to_owned()), None).is_err());
 
         let mut duplicates = make_context(
             root,
@@ -213,7 +174,7 @@ mod tests {
             duplicates
                 .get::<Installer>()
                 .unwrap()
-                .install_package("duplicate")
+                .install(Some("duplicate"))
                 .is_err()
         );
 
@@ -265,14 +226,6 @@ mod tests {
                 .unwrap()
                 .contains("No dependency context files")
         );
-        assert_eq!(
-            skill_list(&mut empty, None).unwrap(),
-            "No dependency skills found"
-        );
-        assert_eq!(
-            skill_install(&mut empty, None, None).unwrap(),
-            "No dependency skills were installed"
-        );
     }
 
     #[test]
@@ -282,7 +235,5 @@ mod tests {
         assert!(list(&mut context, None).is_err());
         assert!(show(&mut context, "provider".to_owned(), "guide.md".to_owned()).is_err());
         assert!(install(&mut context, None).is_err());
-        assert!(skill_list(&mut context, None).is_err());
-        assert!(skill_install(&mut context, None, None).is_err());
     }
 }

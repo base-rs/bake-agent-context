@@ -140,19 +140,9 @@ mod tests {
 
         let registry = Registry::discover().unwrap();
         let output = registry
-            .run_arguments(
-                root,
-                &[
-                    "agent:context:skill:list".to_owned(),
-                    "::".to_owned(),
-                    "agent:context:skill:install".to_owned(),
-                    "::".to_owned(),
-                    "agent:context:install".to_owned(),
-                ],
-            )
+            .run_arguments(root, &["agent:context:install".to_owned()])
             .unwrap();
         assert!(output.contains("No dependency context or skills were installed"));
-        assert!(!root.join(".agents/context/index.md").exists());
         assert!(root.join(".agents/skills").is_dir());
 
         let registry = Registry::discover().unwrap();
@@ -172,7 +162,7 @@ mod tests {
     }
 
     #[test]
-    fn executes_context_and_skill_tasks_with_a_dependency_provider() {
+    fn executes_unified_context_tasks_with_a_dependency_provider() {
         let project = temporary_project_with_context_provider();
         let root = project.path();
 
@@ -184,11 +174,17 @@ mod tests {
 
         let output = Registry::discover()
             .unwrap()
-            .run_arguments(root, &["agent:context:skill:list".to_owned()])
+            .run_arguments(
+                root,
+                &[
+                    "agent:context:list".to_owned(),
+                    "--package".to_owned(),
+                    "docs-provider".to_owned(),
+                ],
+            )
             .unwrap();
-        assert!(output.contains("docs-provider-usage"));
-        assert!(output.contains("docs-provider-workflow"));
-        assert!(output.contains("Use the fixture provider."));
+        assert!(output.contains("usage (skill)"));
+        assert!(output.contains("workflow (skill)"));
 
         let output = Registry::discover()
             .unwrap()
@@ -210,24 +206,6 @@ mod tests {
             .run_arguments(
                 root,
                 &[
-                    "agent:context:skill:install".to_owned(),
-                    "--skill".to_owned(),
-                    "docs-provider-usage".to_owned(),
-                ],
-            )
-            .unwrap();
-        assert!(output.contains("docs-provider-usage"));
-        assert_eq!(
-            fs::read_to_string(root.join(".agents/skills/docs-provider-usage/example.txt"))
-                .unwrap(),
-            "skill asset\n"
-        );
-
-        let output = Registry::discover()
-            .unwrap()
-            .run_arguments(
-                root,
-                &[
                     "agent:context:install".to_owned(),
                     "--package".to_owned(),
                     "docs-provider".to_owned(),
@@ -235,13 +213,16 @@ mod tests {
             )
             .unwrap();
         assert!(output.contains("Installed context from: docs-provider"));
+        assert!(output.contains("docs-provider-usage"));
+        assert_eq!(
+            fs::read_to_string(root.join(".agents/skills/docs-provider-usage/example.txt"))
+                .unwrap(),
+            "skill asset\n"
+        );
         assert!(
             root.join(".agents/context/docs-provider/guide.md")
                 .is_file()
         );
-
-        assert!(!root.join(".agents/context/index.md").exists());
-        assert!(!root.join(".agents/context/docs-provider/usage.md").exists());
     }
 
     #[cfg(unix)]
@@ -260,7 +241,7 @@ mod tests {
 
         let error = Registry::discover()
             .unwrap()
-            .run_arguments(root, &["agent:context:skill:install".to_owned()])
+            .run_arguments(root, &["agent:context:install".to_owned()])
             .unwrap_err()
             .to_string();
         fs::set_permissions(&ownership_path, fs::Permissions::from_mode(0o600)).unwrap();
@@ -274,7 +255,7 @@ mod tests {
 
         let error = Registry::discover()
             .unwrap()
-            .run_arguments(root, &["agent:context:skill:install".to_owned()])
+            .run_arguments(root, &["agent:context:install".to_owned()])
             .unwrap_err()
             .to_string();
         fs::set_permissions(&agents_directory, fs::Permissions::from_mode(0o755)).unwrap();
