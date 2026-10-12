@@ -176,7 +176,7 @@ mod tests {
         write(&guide.context_path.join("guide.md"), "# Guide\n");
         write(
             &guide.context_path.join("broken.md"),
-            "---\nmetadata:\n  type: guide\n---\n# Unsupported\n",
+            "---\nmetadata: [\n---\n# Invalid YAML\n",
         );
         let mut context = make_context(root, vec![guide.clone()]);
 

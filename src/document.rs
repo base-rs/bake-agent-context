@@ -56,7 +56,7 @@ impl ContextDocument {
             } else {
                 0
             };
-            if matches!(front.language(), Some("yaml" | "yml")) {
+            if front.language() == Some("yaml") {
                 let value: Value = serde_yaml_ng::from_str(&front.value).map_err(|error| {
                     Error::new(format!(
                         "invalid YAML front matter in {}: {error}",
@@ -91,16 +91,12 @@ impl ContextDocument {
         self.frontmatter.get("metadata").and_then(Value::as_mapping)
     }
 
-    /// Classify a document from its context metadata.
-    pub(crate) fn is_skill(&self) -> Result<bool> {
-        match self.metadata().and_then(|metadata| metadata.get("type")) {
-            None | Some(Value::Null) => Ok(false),
-            Some(Value::String(kind)) if kind == "skill" => Ok(true),
-            Some(kind) => Err(Error::new(format!(
-                "unsupported context type {kind:?} in {}",
-                self.path.display()
-            ))),
-        }
+    /// Whether the document declares a skill.
+    pub(crate) fn is_skill(&self) -> bool {
+        self.metadata()
+            .and_then(|metadata| metadata.get("type"))
+            .and_then(Value::as_str)
+            == Some("skill")
     }
 
     /// Write the source that was loaded and validated.
@@ -133,7 +129,7 @@ mod tests {
             let source = fixture.replace('\n', ending);
             let document =
                 ContextDocument::parse(source.clone(), Path::new("workflow.md")).unwrap();
-            assert!(document.is_skill().unwrap());
+            assert!(document.is_skill());
             let body = &source[document.body_start..];
             let mut metadata = document.frontmatter.clone();
             metadata.insert("license".into(), "Apache-2.0".into());
@@ -157,15 +153,19 @@ mod tests {
             ("--- yaml\nmetadata: {type: skill}\n---\nBody", true),
             ("``` yaml\nmetadata: {type: skill}\n```\nBody", true),
             ("--- json\nthis is not YAML [\n---\nBody", false),
+            ("--- yml\nthis is not YAML [\n---\nBody", false),
             ("+++\nthis is TOML\n+++\nBody", false),
             ("---\n---", false),
+            ("---\nmetadata: null\n---\n", false),
             ("---\nmetadata: {type: null}\n---\n", false),
+            ("---\nmetadata: {type: guide}\n---\n", false),
+            ("---\nmetadata: {type: false}\n---\n", false),
             ("---\ntype: skill\nmetadata: unrelated\n---\n", false),
             ("# Guide\n\n---\n", false),
         ] {
             let document =
                 ContextDocument::parse(source.to_owned(), Path::new("guide.md")).unwrap();
-            assert_eq!(document.is_skill().unwrap(), skill, "{source}");
+            assert_eq!(document.is_skill(), skill, "{source}");
             if skill {
                 assert!(
                     document
@@ -182,11 +182,5 @@ mod tests {
                     .contains("broken.md")
             );
         }
-        let document = ContextDocument::parse(
-            "---\nmetadata: {type: guide}\n---\n".to_owned(),
-            Path::new("guide.md"),
-        )
-        .unwrap();
-        assert!(document.is_skill().is_err());
     }
 }

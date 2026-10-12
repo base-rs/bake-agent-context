@@ -145,6 +145,32 @@ fn lists_context_files_without_listing_skill_documents_or_assets() {
 }
 
 #[test]
+fn installs_unfamiliar_context_types_alongside_skills() {
+    let (_directory, root) = project();
+    let provider = root.parent().unwrap().join("provider/context");
+    let guide = "---\nmetadata:\n  type: guide\n---\n\n# Guide\n";
+    write(&provider, "guide.md", guide);
+    let installer = Installer::discover(&root).unwrap();
+
+    installer.install(None).unwrap();
+    assert_eq!(
+        fs::read_to_string(root.join(".agents/context/docs-provider/guide.md")).unwrap(),
+        guide
+    );
+    assert_eq!(list_skills(&installer, None).unwrap().len(), 1);
+    assert_eq!(
+        install_skills(&installer, None, None).unwrap(),
+        [format!("{INSTALLED_SKILL_NAME} (docs-provider)")]
+    );
+    assert!(
+        root.join(".agents/skills")
+            .join(INSTALLED_SKILL_NAME)
+            .join("SKILL.md")
+            .exists()
+    );
+}
+
+#[test]
 fn discovers_and_installs_skills_declared_in_yaml_frontmatter() {
     let (_directory, root) = project();
     let installer = Installer::discover(&root).unwrap();
@@ -712,11 +738,6 @@ fn validates_skill_documents_through_the_dependency_build() {
     );
 
     for (name, contents, message) in [
-        (
-            "unsupported.md",
-            "---\nmetadata:\n  type: guide\ndescription: Guide.\n---\n\n# Guide\n",
-            "unsupported context type",
-        ),
         (
             "invalid-yaml.md",
             "---\ntype: [skill\n---\n\n# Skill\n",

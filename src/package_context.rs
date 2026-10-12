@@ -50,7 +50,7 @@ impl PackageContext {
                     None
                 };
                 if let Some(document) = document.as_ref()
-                    && document.is_skill()?
+                    && document.is_skill()
                 {
                     self.skills.push(Skill::from_document(package, document)?);
                 } else {
