@@ -11,7 +11,7 @@ mod skill;
 #[cfg(test)]
 mod test_filesystem;
 
-pub use installer::{ContextDefinition, Definition, Installation, Installer, Provider};
+pub use installer::{Definition, FileDefinition, Installation, Installer, Provider};
 pub use package::Package;
 pub use skill::Skill;
 

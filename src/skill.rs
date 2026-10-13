@@ -305,7 +305,7 @@ fn path_exists(path: &Path) -> Result<bool> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::installer::{ContextDefinition, Installer};
+    use super::super::installer::{Definition, Installer};
     use super::super::package::Package;
     use super::*;
     use std::fs;
@@ -324,7 +324,7 @@ mod tests {
         let mut skills = Vec::new();
         for provider in providers {
             for definition in Package::load(provider)?.definitions {
-                if let ContextDefinition::Skill(skill) = definition {
+                if let Definition::Skill(skill) = definition {
                     skills.push(skill);
                 }
             }

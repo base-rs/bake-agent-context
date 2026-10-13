@@ -2,7 +2,7 @@
 // Copyright, 2026, by Samuel Williams.
 
 use bake::Registry;
-use bake_agent_context::{ContextDefinition, Installer, Package, Skill};
+use bake_agent_context::{Definition, Installer, Package, Skill};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -32,7 +32,7 @@ fn skill_definitions(installer: &Installer, selector: Option<&str>) -> bake::Res
     let mut skills = Vec::new();
     for provider in packages {
         for definition in Package::load(provider)?.definitions {
-            if let ContextDefinition::Skill(skill) = definition {
+            if let Definition::Skill(skill) = definition {
                 skills.push(skill);
             }
         }
@@ -162,10 +162,7 @@ fn lists_context_definitions_with_skill_markers() {
 
     let provider = installer.find_provider("docs-provider").unwrap().unwrap();
     let definitions = Package::load(provider).unwrap().definitions;
-    let names: Vec<_> = definitions
-        .iter()
-        .map(ContextDefinition::display_name)
-        .collect();
+    let names: Vec<_> = definitions.iter().map(Definition::display_name).collect();
     assert_eq!(
         names,
         [
@@ -175,7 +172,7 @@ fn lists_context_definitions_with_skill_markers() {
             "reference/usage.md"
         ]
     );
-    assert!(definitions.iter().any(ContextDefinition::is_skill));
+    assert!(definitions.iter().any(Definition::is_skill));
     assert!(definitions.iter().any(|definition| !definition.is_skill()));
 }
 

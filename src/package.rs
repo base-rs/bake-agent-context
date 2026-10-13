@@ -2,7 +2,7 @@
 // Copyright, 2026, by Samuel Williams.
 
 use super::document::Document;
-use super::installer::{ContextDefinition, Definition, Provider};
+use super::installer::{Definition, FileDefinition, Provider};
 use super::skill::Skill;
 #[cfg(test)]
 use super::test_filesystem as fs;
@@ -14,7 +14,7 @@ use std::path::Path;
 /// A loaded provider and its context definitions.
 pub struct Package {
     pub provider: Provider,
-    pub definitions: Vec<ContextDefinition>,
+    pub definitions: Vec<Definition>,
 }
 
 impl Package {
@@ -26,15 +26,13 @@ impl Package {
         };
         let context_path = package.provider.context_path.clone();
         Self::load_directory(&package.provider, &mut package.definitions, &context_path)?;
-        package
-            .definitions
-            .sort_by_key(ContextDefinition::display_name);
+        package.definitions.sort_by_key(Definition::display_name);
         Ok(package)
     }
 
     fn load_directory(
         provider: &Provider,
-        definitions: &mut Vec<ContextDefinition>,
+        definitions: &mut Vec<Definition>,
         directory: &Path,
     ) -> Result<()> {
         // Load Markdown declarations before interpreting subdirectories:
@@ -59,15 +57,13 @@ impl Package {
                 if let Some(document) = document.as_ref()
                     && document.is_skill()
                 {
-                    definitions.push(ContextDefinition::Skill(Skill::from_document(
-                        provider, document,
-                    )?));
+                    definitions.push(Definition::Skill(Skill::from_document(provider, document)?));
                 } else {
                     let relative = path
                         .strip_prefix(&provider.context_path)
                         .expect("context files belong to their package")
                         .to_owned();
-                    definitions.push(ContextDefinition::File(Definition {
+                    definitions.push(Definition::File(FileDefinition {
                         path: relative,
                         source: path,
                         document,
@@ -79,10 +75,10 @@ impl Package {
         // Companion resources belong to the skill and remain opaque:
         for directory in directories {
             if !definitions.iter().any(|definition| match definition {
-                ContextDefinition::Skill(skill) => {
+                Definition::Skill(skill) => {
                     directory == provider.context_path.join(&skill.source_name)
                 }
-                ContextDefinition::File(_) => false,
+                Definition::File(_) => false,
             }) {
                 Self::load_directory(provider, definitions, &directory)?;
             }
@@ -97,8 +93,8 @@ impl Package {
             .definitions
             .iter()
             .filter_map(|definition| match definition {
-                ContextDefinition::File(file) => Some(file),
-                ContextDefinition::Skill(_) => None,
+                Definition::File(file) => Some(file),
+                Definition::Skill(_) => None,
             })
             .collect();
 
