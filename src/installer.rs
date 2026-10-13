@@ -43,9 +43,9 @@ impl Provider {
     }
 }
 
-/// An ordinary file loaded from a provider's `context/` directory.
+/// An ordinary context definition loaded from a provider's `context/` directory.
 #[derive(Clone, Debug)]
-pub struct ContextFile {
+pub struct Definition {
     /// The path relative to the provider's `context/` directory.
     pub path: PathBuf,
     pub(crate) source: PathBuf,
@@ -54,12 +54,12 @@ pub struct ContextFile {
 
 /// One loaded ordinary context file or skill definition.
 #[derive(Clone, Debug)]
-pub enum Definition {
-    File(ContextFile),
+pub enum ContextDefinition {
+    File(Definition),
     Skill(Skill),
 }
 
-impl Definition {
+impl ContextDefinition {
     /// The name shown by `agent:context:list`.
     pub fn display_name(&self) -> String {
         match self {
@@ -77,7 +77,7 @@ impl Definition {
     }
 }
 
-impl ContextFile {
+impl Definition {
     fn content(&self) -> Result<String> {
         if let Some(document) = &self.document {
             return Ok(document.content.clone());
@@ -252,7 +252,7 @@ impl Installer {
             .definitions
             .iter()
             .find_map(|definition| match definition {
-                Definition::Skill(skill)
+                ContextDefinition::Skill(skill)
                     if skill.name == file
                         || skill.source_name == file
                         || format!("{}.md", skill.source_name) == file =>
@@ -275,10 +275,10 @@ impl Installer {
             .definitions
             .iter()
             .find_map(|definition| match definition {
-                Definition::File(file) if file.path == relative => Some(file),
+                ContextDefinition::File(file) if file.path == relative => Some(file),
                 _ => None,
             });
-        definition.map(ContextFile::content).transpose()
+        definition.map(Definition::content).transpose()
     }
 
     /// Install context and skills from the same loaded provider documents.
@@ -300,8 +300,8 @@ impl Installer {
             .iter()
             .flat_map(|package| package.definitions.iter())
             .filter_map(|definition| match definition {
-                Definition::Skill(skill) => Some(skill.clone()),
-                Definition::File(_) => None,
+                ContextDefinition::Skill(skill) => Some(skill.clone()),
+                ContextDefinition::File(_) => None,
             })
             .collect();
         let package = selector
