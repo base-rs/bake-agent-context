@@ -2,7 +2,7 @@
 // Copyright, 2026, by Samuel Williams.
 
 use super::document::ContextDocument;
-use super::installer::{ContextPackage, remove_existing};
+use super::installer::{Provider, remove_existing};
 use super::ownership::installed_skill_owners;
 #[cfg(test)]
 use super::test_filesystem as filesystem;
@@ -19,7 +19,7 @@ pub struct Skill {
     /// Authored or derived name used for the installed directory.
     pub name: String,
     pub description: String,
-    pub package: ContextPackage,
+    pub provider: Provider,
     pub(crate) source_name: String,
     assets: Option<PathBuf>,
     content: String,
@@ -28,7 +28,7 @@ pub struct Skill {
 impl Skill {
     /// The package selector accepted by `--package`.
     pub fn package_selector(&self) -> &str {
-        self.package.selector()
+        self.provider.selector()
     }
 
     /// Installed instructions, including provider metadata.
@@ -37,12 +37,9 @@ impl Skill {
     }
 
     /// Apply skill-specific rules to a parsed document.
-    pub(crate) fn from_document(
-        package: &ContextPackage,
-        document: &ContextDocument,
-    ) -> Result<Self> {
+    pub(crate) fn from_document(provider: &Provider, document: &ContextDocument) -> Result<Self> {
         let source = &document.path;
-        if source.parent() != Some(package.context_path.as_path()) {
+        if source.parent() != Some(provider.context_path.as_path()) {
             return Err(Error::new(format!(
                 "skill document {} must be directly inside context/",
                 source.display()
@@ -55,7 +52,7 @@ impl Skill {
             Some(Value::String(name)) => name.clone(),
             None => format!(
                 "{}-{source_name}",
-                package.name.to_ascii_lowercase().replace('_', "-")
+                provider.name.to_ascii_lowercase().replace('_', "-")
             ),
             _ => {
                 return Err(Error::new(format!(
@@ -79,20 +76,20 @@ impl Skill {
             .to_owned();
 
         // Add resolved provenance while retaining the provider's remaining metadata:
-        let assets = skill_assets_path(&package.context_path, &source_name)?;
+        let assets = skill_assets_path(&provider.context_path, &source_name)?;
         let mut frontmatter = document.frontmatter.clone();
         frontmatter.insert("name".into(), name.clone().into());
         let mut metadata = document.metadata().cloned().unwrap_or_default();
         metadata.insert("ecosystem".into(), "cargo".into());
-        metadata.insert("package".into(), package.name.clone().into());
-        metadata.insert("version".into(), package.version.clone().into());
+        metadata.insert("package".into(), provider.name.clone().into());
+        metadata.insert("version".into(), provider.version.clone().into());
         frontmatter.insert("metadata".into(), Value::Mapping(metadata));
         let content = document.render(frontmatter);
 
         Ok(Self {
             name,
             description,
-            package: package.clone(),
+            provider: provider.clone(),
             source_name,
             assets,
             content,
@@ -159,7 +156,7 @@ pub(crate) fn install_definitions(
         let destination = skills_root.join(&skill.name);
         if path_exists(&destination)?
             && owners.get(&skill.name).is_none_or(|owner| {
-                owner.ecosystem != "cargo" || owner.package != skill.package.name
+                owner.ecosystem != "cargo" || owner.package != skill.provider.name
             })
         {
             return Err(Error::new(format!(
@@ -309,35 +306,34 @@ fn path_exists(path: &Path) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::super::installer::{Definition, Installer};
+    use super::super::package::Package;
     use super::*;
     use std::fs;
     use tempfile::tempdir;
 
     fn list_skills(installer: &Installer, selector: Option<&str>) -> Result<Vec<Skill>> {
-        let packages = if let Some(selector) = selector {
-            let Some(package) = installer.find_package(selector)? else {
+        let providers = if let Some(selector) = selector {
+            let Some(provider) = installer.find_provider(selector)? else {
                 return Ok(Vec::new());
             };
-            vec![package]
+            vec![provider]
         } else {
-            installer.packages().to_vec()
+            installer.providers().to_vec()
         };
 
         let mut skills = Vec::new();
-        for package in packages {
-            for definition in
-                super::super::package_context::PackageContext::load(&package)?.definitions
-            {
+        for provider in providers {
+            for definition in Package::load(provider)?.definitions {
                 if let Definition::Skill(skill) = definition {
                     skills.push(skill);
                 }
             }
         }
         skills.sort_by(|left, right| {
-            left.package
+            left.provider
                 .name
-                .cmp(&right.package.name)
-                .then_with(|| left.package.version.cmp(&right.package.version))
+                .cmp(&right.provider.name)
+                .then_with(|| left.provider.version.cmp(&right.provider.version))
                 .then_with(|| left.name.cmp(&right.name))
         });
         Ok(skills)
@@ -346,20 +342,20 @@ mod tests {
     fn install_skills(installer: &Installer, selector: Option<&str>) -> Result<Vec<String>> {
         let skills = list_skills(installer, selector)?;
         let package = if selector.is_some() {
-            skills.first().map(|skill| skill.package.name.as_str())
+            skills.first().map(|skill| skill.provider.name.as_str())
         } else {
             None
         };
         install_definitions(installer.root(), &skills, package, true)
     }
 
-    fn provider(root: &Path, name: &str, version: &str) -> ContextPackage {
+    fn provider(root: &Path, name: &str, version: &str) -> Provider {
         let path = root.join(format!("{name}-{version}/context"));
         fs::create_dir_all(&path).unwrap();
-        ContextPackage::for_test(name, version, path)
+        Provider::for_test(name, version, path)
     }
 
-    fn write_skill(package: &ContextPackage, name: &str, fields: &str, body: &str) {
+    fn write_skill(package: &Provider, name: &str, fields: &str, body: &str) {
         fs::write(
             package.context_path.join(format!("{name}.md")),
             format!("---\nmetadata:\n  type: skill\n{fields}---\n{body}"),
@@ -424,7 +420,7 @@ mod tests {
         );
         let skills = list_skills(&installer, None).unwrap();
         assert_eq!(skills[0].name, "a-provider-alpha");
-        assert_eq!(skills[0].package.version, "1.0.0");
+        assert_eq!(skills[0].provider.version, "1.0.0");
         assert_eq!(skills.last().unwrap().name, "z-provider-zeta");
         assert!(
             install_skills(&installer, None)

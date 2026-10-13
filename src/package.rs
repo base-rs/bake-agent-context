@@ -2,7 +2,7 @@
 // Copyright, 2026, by Samuel Williams.
 
 use super::document::ContextDocument;
-use super::installer::{ContextFile, ContextPackage, Definition};
+use super::installer::{ContextFile, Definition, Provider};
 use super::skill::Skill;
 #[cfg(test)]
 use super::test_filesystem as fs;
@@ -11,22 +11,30 @@ use bake::{Error, Result};
 use std::fs;
 use std::path::Path;
 
-/// Loaded definitions from one resolved provider.
-pub(crate) struct PackageContext {
-    pub(crate) definitions: Vec<Definition>,
+/// A loaded provider and its context definitions.
+pub struct Package {
+    pub provider: Provider,
+    pub definitions: Vec<Definition>,
 }
 
-impl PackageContext {
+impl Package {
     /// Classify root documents before descending into companion resource directories.
-    pub(crate) fn load(package: &ContextPackage) -> Result<Self> {
-        let mut context = Self {
+    pub fn load(provider: Provider) -> Result<Self> {
+        let mut package = Self {
+            provider,
             definitions: Vec::new(),
         };
-        context.load_directory(package, &package.context_path)?;
-        Ok(context)
+        let context_path = package.provider.context_path.clone();
+        Self::load_directory(&package.provider, &mut package.definitions, &context_path)?;
+        package.definitions.sort_by_key(Definition::display_name);
+        Ok(package)
     }
 
-    fn load_directory(&mut self, package: &ContextPackage, directory: &Path) -> Result<()> {
+    fn load_directory(
+        provider: &Provider,
+        definitions: &mut Vec<Definition>,
+        directory: &Path,
+    ) -> Result<()> {
         // Load Markdown declarations before interpreting subdirectories:
         let entries = fs::read_dir(directory)
             .map_err(|error| Error::new(format!("cannot read {}: {error}", directory.display())))?;
@@ -49,14 +57,13 @@ impl PackageContext {
                 if let Some(document) = document.as_ref()
                     && document.is_skill()
                 {
-                    self.definitions
-                        .push(Definition::Skill(Skill::from_document(package, document)?));
+                    definitions.push(Definition::Skill(Skill::from_document(provider, document)?));
                 } else {
                     let relative = path
-                        .strip_prefix(&package.context_path)
+                        .strip_prefix(&provider.context_path)
                         .expect("context files belong to their package")
                         .to_owned();
-                    self.definitions.push(Definition::File(ContextFile {
+                    definitions.push(Definition::File(ContextFile {
                         path: relative,
                         source: path,
                         document,
@@ -67,16 +74,15 @@ impl PackageContext {
 
         // Companion resources belong to the skill and remain opaque:
         for directory in directories {
-            if !self.definitions.iter().any(|definition| match definition {
+            if !definitions.iter().any(|definition| match definition {
                 Definition::Skill(skill) => {
-                    directory == package.context_path.join(&skill.source_name)
+                    directory == provider.context_path.join(&skill.source_name)
                 }
                 Definition::File(_) => false,
             }) {
-                self.load_directory(package, &directory)?;
+                Self::load_directory(provider, definitions, &directory)?;
             }
         }
-        self.definitions.sort_by_key(Definition::display_name);
         Ok(())
     }
 
@@ -129,8 +135,9 @@ mod tests {
         fs::write(source.join("image.bin"), [0, 255]).unwrap();
         #[cfg(unix)]
         std::os::unix::fs::symlink("guide.md", source.join("linked.md")).unwrap();
-        let package = ContextPackage::for_test("provider", "1.0.0", source.clone());
-        let loaded = PackageContext::load(&package).unwrap();
+        let provider = Provider::for_test("provider", "1.0.0", source.clone());
+        let loaded = Package::load(provider).unwrap();
+        assert_eq!(loaded.provider.name, "provider");
         fs::write(source.join("guide.md"), "# Changed\n").unwrap();
         let destination = directory.path().join("installed");
         loaded.install(&destination).unwrap();
@@ -162,7 +169,7 @@ mod tests {
         let source = directory.path().join("context");
         fs::create_dir(&source).unwrap();
         fs::write(source.join("guide.md"), "# Guide\n").unwrap();
-        let package = ContextPackage::for_test("provider", "1.0.0", source.clone());
+        let provider = Provider::for_test("provider", "1.0.0", source.clone());
         for (operation, path) in [
             (Operation::ReadDirectory, source.clone()),
             (Operation::ReadDirectoryEntry, source.clone()),
@@ -170,7 +177,7 @@ mod tests {
         ] {
             let _failure = fail_once(operation, move |candidate| candidate == path);
             assert!(
-                PackageContext::load(&package)
+                Package::load(provider.clone())
                     .err()
                     .unwrap()
                     .to_string()

@@ -6,12 +6,13 @@ mod document;
 mod exclude;
 mod installer;
 mod ownership;
-mod package_context;
+mod package;
 mod skill;
 #[cfg(test)]
 mod test_filesystem;
 
-pub use installer::{ContextFile, ContextPackage, Definition, Installation, Installer};
+pub use installer::{ContextFile, Definition, Installation, Installer, Provider};
+pub use package::Package;
 pub use skill::Skill;
 
 use bake::{Context, Error, Result};
@@ -32,37 +33,41 @@ pub fn list(context: &mut Context, package: Option<String>) -> Result<String> {
     let installer = installer(context)?;
 
     if let Some(package) = package {
-        let Some(package) = installer.find_package(&package)? else {
+        let Some(provider) = installer.find_provider(&package)? else {
             return Ok(format!("No context found for crate '{package}'"));
         };
 
-        let definitions = installer.list_context_definitions(&package)?;
-        if definitions.is_empty() {
+        let package = Package::load(provider.clone())?;
+        if package.definitions.is_empty() {
             return Ok(format!(
                 "No context definitions found for crate '{}'.",
-                package.selector()
+                provider.selector()
             ));
         }
-        let mut output = format!("Context files for crate '{}':", package.selector());
-        for definition in definitions {
+        let mut output = format!("Context files for crate '{}':", provider.selector());
+        for definition in package.definitions {
             output.push_str(&format!("\n  {}", definition.display_name()));
         }
         return Ok(output);
     }
 
-    let mut packages = Vec::new();
-    for package in installer.packages() {
-        if !installer.list_context_definitions(package)?.is_empty() {
-            packages.push(package);
+    let mut providers = Vec::new();
+    for provider in installer.providers() {
+        if !Package::load(provider.clone())?.definitions.is_empty() {
+            providers.push(provider);
         }
     }
-    if packages.is_empty() {
+    if providers.is_empty() {
         return Ok("No dependency context files found".to_owned());
     }
 
     let mut output = String::from("Crates with context available:");
-    for package in packages {
-        output.push_str(&format!("\n  {} ({})", package.selector(), package.version));
+    for provider in providers {
+        output.push_str(&format!(
+            "\n  {} ({})",
+            provider.selector(),
+            provider.version
+        ));
     }
     Ok(output)
 }
@@ -116,14 +121,14 @@ mod tests {
     use std::path::Path;
     use tempfile::tempdir;
 
-    fn make_context(root: &Path, packages: Vec<ContextPackage>) -> Context {
+    fn make_context(root: &Path, providers: Vec<Provider>) -> Context {
         let mut context = bake::Registry::new().context(root);
-        context.insert(Installer::for_test(root, packages));
+        context.insert(Installer::for_test(root, providers));
         context
     }
 
-    fn package(root: &Path, name: &str, version: &str) -> ContextPackage {
-        ContextPackage::for_test(name, version, root.join(name).join("context"))
+    fn provider(root: &Path, name: &str, version: &str) -> Provider {
+        Provider::for_test(name, version, root.join(name).join("context"))
     }
 
     fn write(path: &Path, contents: &str) {
@@ -135,7 +140,7 @@ mod tests {
     fn task_wrappers_return_outputs_and_propagate_errors() {
         let directory = tempdir().unwrap();
         let root = directory.path();
-        let guide = package(root, "provider", "1.0.0");
+        let guide = provider(root, "provider", "1.0.0");
         write(&guide.context_path.join("guide.md"), "# Guide\n");
         write(
             &guide.context_path.join("broken.md"),
@@ -157,8 +162,8 @@ mod tests {
         let mut duplicates = make_context(
             root,
             vec![
-                package(root, "duplicate", "1.0.0"),
-                package(root, "duplicate", "2.0.0"),
+                provider(root, "duplicate", "1.0.0"),
+                provider(root, "duplicate", "2.0.0"),
             ],
         );
         assert!(list(&mut duplicates, Some("duplicate".to_owned())).is_err());
@@ -178,7 +183,7 @@ mod tests {
                 .is_err()
         );
 
-        let listing_package = package(root, "listing", "1.0.0");
+        let listing_package = provider(root, "listing", "1.0.0");
         write(
             &listing_package.context_path.join("guide.md"),
             "# Listing\n",
@@ -190,7 +195,7 @@ mod tests {
                 .contains("listing@1.0.0 (1.0.0)")
         );
 
-        let empty_package = package(root, "empty", "1.0.0");
+        let empty_package = provider(root, "empty", "1.0.0");
         fs::create_dir_all(&empty_package.context_path).unwrap();
         let mut empty_context = make_context(root, vec![empty_package]);
         assert_eq!(
@@ -208,7 +213,7 @@ mod tests {
     fn task_wrappers_propagate_install_failures() {
         let directory = tempdir().unwrap();
         let root = directory.path();
-        let provider = package(root, "provider", "1.0.0");
+        let provider = provider(root, "provider", "1.0.0");
         write(&provider.context_path.join("guide.md"), "# Guide\n");
 
         let ownership = root.join(".agents/skills/provider-workflow/SKILL.md");

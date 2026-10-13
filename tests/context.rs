@@ -2,7 +2,7 @@
 // Copyright, 2026, by Samuel Williams.
 
 use bake::Registry;
-use bake_agent_context::{Definition, Installer, Skill};
+use bake_agent_context::{Definition, Installer, Package, Skill};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -21,17 +21,17 @@ fn write(root: &Path, relative_path: &str, contents: &str) {
 
 fn skill_definitions(installer: &Installer, selector: Option<&str>) -> bake::Result<Vec<Skill>> {
     let packages = if let Some(selector) = selector {
-        let Some(package) = installer.find_package(selector)? else {
+        let Some(provider) = installer.find_provider(selector)? else {
             return Ok(Vec::new());
         };
-        vec![package]
+        vec![provider]
     } else {
-        installer.packages().to_vec()
+        installer.providers().to_vec()
     };
 
     let mut skills = Vec::new();
-    for package in packages {
-        for definition in installer.list_context_definitions(&package)? {
+    for provider in packages {
+        for definition in Package::load(provider)?.definitions {
             if let Definition::Skill(skill) = definition {
                 skills.push(skill);
             }
@@ -155,13 +155,13 @@ fn lists_context_definitions_with_skill_markers() {
 
     let installer = Installer::discover(&root).unwrap();
 
-    let packages = installer.packages();
-    assert_eq!(packages.len(), 1);
-    assert_eq!(packages[0].selector(), "docs-provider");
-    assert_eq!(packages[0].version, "1.2.3");
+    let providers = installer.providers();
+    assert_eq!(providers.len(), 1);
+    assert_eq!(providers[0].selector(), "docs-provider");
+    assert_eq!(providers[0].version, "1.2.3");
 
-    let package = installer.find_package("docs-provider").unwrap().unwrap();
-    let definitions = installer.list_context_definitions(&package).unwrap();
+    let provider = installer.find_provider("docs-provider").unwrap().unwrap();
+    let definitions = Package::load(provider).unwrap().definitions;
     let names: Vec<_> = definitions.iter().map(Definition::display_name).collect();
     assert_eq!(
         names,
@@ -579,7 +579,7 @@ fn discovers_multiple_context_providers_and_orders_their_skills() {
     let installer = Installer::discover(&root).unwrap();
     assert_eq!(
         installer
-            .packages()
+            .providers()
             .iter()
             .map(|package| package.name.as_str())
             .collect::<Vec<_>>(),

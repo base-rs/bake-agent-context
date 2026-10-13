@@ -1,7 +1,7 @@
 // Released under the MIT License.
 // Copyright, 2026, by Samuel Williams.
 
-use super::package_context::PackageContext;
+use super::package::Package;
 use super::skill::Skill;
 #[cfg(test)]
 use super::test_filesystem as fs;
@@ -17,7 +17,7 @@ use std::process::Command;
 
 /// A resolved Cargo package that provides a top-level `context/` directory.
 #[derive(Clone, Debug)]
-pub struct ContextPackage {
+pub struct Provider {
     pub name: String,
     pub version: String,
     pub description: Option<String>,
@@ -25,7 +25,7 @@ pub struct ContextPackage {
     selector: String,
 }
 
-impl ContextPackage {
+impl Provider {
     /// The name accepted by the task's `--package` option.
     pub fn selector(&self) -> &str {
         &self.selector
@@ -99,7 +99,7 @@ pub struct Installation {
 pub struct Installer {
     root: PathBuf,
     context_path: PathBuf,
-    packages: Vec<ContextPackage>,
+    providers: Vec<Provider>,
 }
 
 impl Installer {
@@ -126,11 +126,11 @@ impl Installer {
     }
 
     #[cfg(test)]
-    pub(super) fn for_test(root: &Path, packages: Vec<ContextPackage>) -> Self {
+    pub(super) fn for_test(root: &Path, providers: Vec<Provider>) -> Self {
         Self {
             root: root.to_path_buf(),
             context_path: root.join(".agents/context"),
-            packages,
+            providers,
         }
     }
 
@@ -171,7 +171,7 @@ impl Installer {
                     )));
                 }
             };
-            candidates.push(ContextPackage {
+            candidates.push(Provider {
                 name: package.name,
                 version: package.version,
                 description: package.description,
@@ -181,14 +181,14 @@ impl Installer {
         }
 
         let mut name_counts = HashMap::new();
-        for package in &candidates {
-            *name_counts.entry(package.name.clone()).or_insert(0usize) += 1;
+        for provider in &candidates {
+            *name_counts.entry(provider.name.clone()).or_insert(0usize) += 1;
         }
-        for package in &mut candidates {
-            package.selector = if name_counts[&package.name] == 1 {
-                package.name.clone()
+        for provider in &mut candidates {
+            provider.selector = if name_counts[&provider.name] == 1 {
+                provider.name.clone()
             } else {
-                format!("{}@{}", package.name, package.version)
+                format!("{}@{}", provider.name, provider.version)
             };
         }
         candidates.sort_by(|left, right| {
@@ -200,7 +200,7 @@ impl Installer {
         Ok(Self {
             context_path: root.join(".agents/context"),
             root,
-            packages: candidates,
+            providers: candidates,
         })
     }
 
@@ -212,24 +212,24 @@ impl Installer {
         &self.context_path
     }
 
-    pub fn packages(&self) -> &[ContextPackage] {
-        &self.packages
+    pub fn providers(&self) -> &[Provider] {
+        &self.providers
     }
 
-    pub fn find_package(&self, selector: &str) -> Result<Option<ContextPackage>> {
+    pub fn find_provider(&self, selector: &str) -> Result<Option<Provider>> {
         let matches: Vec<_> = self
-            .packages
+            .providers
             .iter()
-            .filter(|package| package.selector == selector || package.name == selector)
+            .filter(|provider| provider.selector == selector || provider.name == selector)
             .collect();
 
         match matches.as_slice() {
             [] => Ok(None),
-            [package] => Ok(Some((*package).clone())),
+            [provider] => Ok(Some((*provider).clone())),
             _ => {
                 let selectors = matches
                     .iter()
-                    .map(|package| package.selector.as_str())
+                    .map(|provider| provider.selector.as_str())
                     .collect::<Vec<_>>()
                     .join(", ");
                 Err(Error::new(format!(
@@ -239,22 +239,16 @@ impl Installer {
         }
     }
 
-    /// Load every ordinary context and skill definition from one provider.
-    pub fn list_context_definitions(&self, package: &ContextPackage) -> Result<Vec<Definition>> {
-        let context = PackageContext::load(package)?;
-        Ok(context.definitions)
-    }
-
     /// Show an ordinary document or opaque resource from a provider.
     pub fn show_context_file(&self, selector: &str, file: &str) -> Result<Option<String>> {
-        let Some(package) = self.find_package(selector)? else {
+        let Some(provider) = self.find_provider(selector)? else {
             return Ok(None);
         };
-        let selected_file = find_context_file_with_root(&package.context_path, file)?;
-        let context = PackageContext::load(&package)?;
+        let selected_file = find_context_file_with_root(&provider.context_path, file)?;
+        let package = Package::load(provider)?;
 
         // Skills are shown by their installed name through the same task:
-        if let Some(skill) = context
+        if let Some(skill) = package
             .definitions
             .iter()
             .find_map(|definition| match definition {
@@ -277,7 +271,7 @@ impl Installer {
         let relative = path
             .strip_prefix(root)
             .expect("resolved context paths stay within their root");
-        let definition = context
+        let definition = package
             .definitions
             .iter()
             .find_map(|definition| match definition {
@@ -290,36 +284,36 @@ impl Installer {
     /// Install context and skills from the same loaded provider documents.
     pub fn install(&self, selector: Option<&str>) -> Result<Installation> {
         // Resolve the requested scope and load each provider once:
-        let packages =
+        let providers =
             if let Some(selector) = selector {
-                vec![self.find_package(selector)?.ok_or_else(|| {
+                vec![self.find_provider(selector)?.ok_or_else(|| {
                     Error::new(format!("no context found for crate {selector:?}"))
                 })?]
             } else {
-                self.packages.clone()
+                self.providers.clone()
             };
-        let loaded = packages
+        let loaded = providers
             .iter()
-            .map(|package| PackageContext::load(package).map(|context| (package, context)))
+            .map(|provider| Package::load(provider.clone()))
             .collect::<Result<Vec<_>>>()?;
         let definitions: Vec<_> = loaded
             .iter()
-            .flat_map(|(_, context)| context.definitions.iter())
+            .flat_map(|package| package.definitions.iter())
             .filter_map(|definition| match definition {
                 Definition::Skill(skill) => Some(skill.clone()),
                 Definition::File(_) => None,
             })
             .collect();
         let package = selector
-            .and_then(|_| packages.first())
-            .map(|package| package.name.as_str());
+            .and_then(|_| providers.first())
+            .map(|provider| provider.name.as_str());
 
         // Apply skill installation rules, then write ordinary definitions:
         let skills = super::skill::install_definitions(&self.root, &definitions, package, true)?;
         let mut context_names = Vec::new();
-        for (package, definitions) in loaded {
-            if definitions.install(&self.context_path.join(package.selector()))? {
-                context_names.push(package.selector().to_owned());
+        for package in loaded {
+            if package.install(&self.context_path.join(package.provider.selector()))? {
+                context_names.push(package.provider.selector().to_owned());
             }
         }
         Ok(Installation {
@@ -602,23 +596,23 @@ mod tests {
         assert_eq!(installer.context_path(), root.join(".agents/context"));
         assert_eq!(
             installer
-                .packages()
+                .providers()
                 .iter()
-                .map(ContextPackage::selector)
+                .map(Provider::selector)
                 .collect::<Vec<_>>(),
             ["duplicate@1.0.0", "duplicate@2.0.0"]
         );
-        assert!(installer.find_package("missing").unwrap().is_none());
+        assert!(installer.find_provider("missing").unwrap().is_none());
         assert!(
             installer
-                .find_package("duplicate")
+                .find_provider("duplicate")
                 .unwrap_err()
                 .to_string()
                 .contains("duplicate@1.0.0, duplicate@2.0.0")
         );
         assert_eq!(
             installer
-                .find_package("duplicate@2.0.0")
+                .find_provider("duplicate@2.0.0")
                 .unwrap()
                 .unwrap()
                 .version,
@@ -655,8 +649,8 @@ mod tests {
             resolve: None,
         };
         let installer = Installer::discover_from_metadata(root.to_path_buf(), metadata).unwrap();
-        assert_eq!(installer.packages().len(), 1);
-        assert_eq!(installer.packages()[0].selector(), "valid");
+        assert_eq!(installer.providers().len(), 1);
+        assert_eq!(installer.providers()[0].selector(), "valid");
     }
 
     #[cfg(unix)]
@@ -762,7 +756,7 @@ mod tests {
             "---\nmetadata: {type: skill}\ndescription: Workflow.\n---\n",
         )
         .unwrap();
-        let package = ContextPackage::for_test("provider", "1.0.0", context.clone());
+        let package = Provider::for_test("provider", "1.0.0", context.clone());
         let installer = Installer::for_test(root, vec![package.clone()]);
         assert_eq!(
             installer
@@ -810,7 +804,7 @@ mod tests {
         let context = root.join("provider/context");
         fs::create_dir_all(&context).unwrap();
         fs::write(context.join("guide.md"), "# Guide\n").unwrap();
-        let package = ContextPackage::for_test("provider", "1.0.0", context);
+        let package = Provider::for_test("provider", "1.0.0", context);
         let installer = Installer::for_test(root, vec![package]);
         let destination = root.join(".agents/context/provider@1.0.0/guide.md");
         let _failure = fs::fail_once(fs::Operation::Write, move |path| path == destination);
