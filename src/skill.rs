@@ -2,7 +2,7 @@
 // Copyright, 2026, by Samuel Williams.
 
 use super::document::Document;
-use super::installer::{Provider, remove_existing};
+use super::installer::{Specification, remove_existing};
 use super::ownership::installed_skill_owners;
 #[cfg(test)]
 use super::test_filesystem as filesystem;
@@ -15,17 +15,17 @@ use std::path::{Path, PathBuf};
 
 /// A skill declared by a dependency context document.
 #[derive(Clone, Debug)]
-pub struct Skill {
+pub struct SkillDefinition {
     /// Authored or derived name used for the installed directory.
     pub name: String,
     pub description: String,
-    pub provider: Provider,
+    pub provider: Specification,
     pub(crate) source_name: String,
     assets: Option<PathBuf>,
     content: String,
 }
 
-impl Skill {
+impl SkillDefinition {
     /// The package selector accepted by `--package`.
     pub fn package_selector(&self) -> &str {
         self.provider.selector()
@@ -37,7 +37,7 @@ impl Skill {
     }
 
     /// Apply skill-specific rules to a parsed document.
-    pub(crate) fn from_document(provider: &Provider, document: &Document) -> Result<Self> {
+    pub(crate) fn from_document(provider: &Specification, document: &Document) -> Result<Self> {
         let source = &document.path;
         if source.parent() != Some(provider.context_path.as_path()) {
             return Err(Error::new(format!(
@@ -136,7 +136,7 @@ fn skill_assets_path(context_path: &Path, source_name: &str) -> Result<Option<Pa
 /// Refresh loaded skills and reconcile stale destinations within the selected scope.
 pub(crate) fn install_definitions(
     root: &Path,
-    skills: &[Skill],
+    skills: &[SkillDefinition],
     package: Option<&str>,
     reconcile: bool,
 ) -> Result<Vec<String>> {
@@ -311,7 +311,7 @@ mod tests {
     use std::fs;
     use tempfile::tempdir;
 
-    fn list_skills(installer: &Installer, selector: Option<&str>) -> Result<Vec<Skill>> {
+    fn list_skills(installer: &Installer, selector: Option<&str>) -> Result<Vec<SkillDefinition>> {
         let providers = if let Some(selector) = selector {
             let Some(provider) = installer.find_provider(selector)? else {
                 return Ok(Vec::new());
@@ -349,13 +349,13 @@ mod tests {
         install_definitions(installer.root(), &skills, package, true)
     }
 
-    fn provider(root: &Path, name: &str, version: &str) -> Provider {
+    fn provider(root: &Path, name: &str, version: &str) -> Specification {
         let path = root.join(format!("{name}-{version}/context"));
         fs::create_dir_all(&path).unwrap();
-        Provider::for_test(name, version, path)
+        Specification::for_test(name, version, path)
     }
 
-    fn write_skill(package: &Provider, name: &str, fields: &str, body: &str) {
+    fn write_skill(package: &Specification, name: &str, fields: &str, body: &str) {
         fs::write(
             package.context_path.join(format!("{name}.md")),
             format!("---\nmetadata:\n  type: skill\n{fields}---\n{body}"),
@@ -716,7 +716,7 @@ mod tests {
         )
         .unwrap();
         assert!(
-            Skill::from_document(&package, &document)
+            SkillDefinition::from_document(&package, &document)
                 .unwrap_err()
                 .to_string()
                 .contains("invalid skill filename")

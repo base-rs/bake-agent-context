@@ -2,8 +2,8 @@
 // Copyright, 2026, by Samuel Williams.
 
 use super::document::Document;
-use super::installer::{Definition, FileDefinition, Provider};
-use super::skill::Skill;
+use super::installer::{Definition, FileDefinition, Specification};
+use super::skill::SkillDefinition;
 #[cfg(test)]
 use super::test_filesystem as fs;
 use bake::{Error, Result};
@@ -13,25 +13,29 @@ use std::path::Path;
 
 /// A loaded provider and its context definitions.
 pub struct Package {
-    pub provider: Provider,
+    pub specification: Specification,
     pub definitions: Vec<Definition>,
 }
 
 impl Package {
     /// Classify root documents before descending into companion resource directories.
-    pub fn load(provider: Provider) -> Result<Self> {
+    pub fn load(specification: Specification) -> Result<Self> {
         let mut package = Self {
-            provider,
+            specification,
             definitions: Vec::new(),
         };
-        let context_path = package.provider.context_path.clone();
-        Self::load_directory(&package.provider, &mut package.definitions, &context_path)?;
+        let context_path = package.specification.context_path.clone();
+        Self::load_directory(
+            &package.specification,
+            &mut package.definitions,
+            &context_path,
+        )?;
         package.definitions.sort_by_key(Definition::display_name);
         Ok(package)
     }
 
     fn load_directory(
-        provider: &Provider,
+        provider: &Specification,
         definitions: &mut Vec<Definition>,
         directory: &Path,
     ) -> Result<()> {
@@ -57,7 +61,9 @@ impl Package {
                 if let Some(document) = document.as_ref()
                     && document.is_skill()
                 {
-                    definitions.push(Definition::Skill(Skill::from_document(provider, document)?));
+                    definitions.push(Definition::Skill(SkillDefinition::from_document(
+                        provider, document,
+                    )?));
                 } else {
                     let relative = path
                         .strip_prefix(&provider.context_path)
@@ -135,9 +141,9 @@ mod tests {
         fs::write(source.join("image.bin"), [0, 255]).unwrap();
         #[cfg(unix)]
         std::os::unix::fs::symlink("guide.md", source.join("linked.md")).unwrap();
-        let provider = Provider::for_test("provider", "1.0.0", source.clone());
+        let provider = Specification::for_test("provider", "1.0.0", source.clone());
         let loaded = Package::load(provider).unwrap();
-        assert_eq!(loaded.provider.name, "provider");
+        assert_eq!(loaded.specification.name, "provider");
         fs::write(source.join("guide.md"), "# Changed\n").unwrap();
         let destination = directory.path().join("installed");
         loaded.install(&destination).unwrap();
@@ -169,7 +175,7 @@ mod tests {
         let source = directory.path().join("context");
         fs::create_dir(&source).unwrap();
         fs::write(source.join("guide.md"), "# Guide\n").unwrap();
-        let provider = Provider::for_test("provider", "1.0.0", source.clone());
+        let provider = Specification::for_test("provider", "1.0.0", source.clone());
         for (operation, path) in [
             (Operation::ReadDirectory, source.clone()),
             (Operation::ReadDirectoryEntry, source.clone()),

@@ -11,9 +11,9 @@ mod skill;
 #[cfg(test)]
 mod test_filesystem;
 
-pub use installer::{Definition, FileDefinition, Installation, Installer, Provider};
+pub use installer::{Definition, FileDefinition, Installation, Installer, Specification};
 pub use package::Package;
-pub use skill::Skill;
+pub use skill::SkillDefinition;
 
 use bake::{Context, Error, Result};
 
@@ -121,14 +121,14 @@ mod tests {
     use std::path::Path;
     use tempfile::tempdir;
 
-    fn make_context(root: &Path, providers: Vec<Provider>) -> Context {
+    fn make_context(root: &Path, providers: Vec<Specification>) -> Context {
         let mut context = bake::Registry::new().context(root);
         context.insert(Installer::for_test(root, providers));
         context
     }
 
-    fn provider(root: &Path, name: &str, version: &str) -> Provider {
-        Provider::for_test(name, version, root.join(name).join("context"))
+    fn provider(root: &Path, name: &str, version: &str) -> Specification {
+        Specification::for_test(name, version, root.join(name).join("context"))
     }
 
     fn write(path: &Path, contents: &str) {

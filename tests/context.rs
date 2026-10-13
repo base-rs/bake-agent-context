@@ -2,7 +2,7 @@
 // Copyright, 2026, by Samuel Williams.
 
 use bake::Registry;
-use bake_agent_context::{Definition, Installer, Package, Skill};
+use bake_agent_context::{Definition, Installer, Package, SkillDefinition};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -19,7 +19,10 @@ fn write(root: &Path, relative_path: &str, contents: &str) {
     fs::write(path, contents).unwrap();
 }
 
-fn skill_definitions(installer: &Installer, selector: Option<&str>) -> bake::Result<Vec<Skill>> {
+fn skill_definitions(
+    installer: &Installer,
+    selector: Option<&str>,
+) -> bake::Result<Vec<SkillDefinition>> {
     let packages = if let Some(selector) = selector {
         let Some(provider) = installer.find_provider(selector)? else {
             return Ok(Vec::new());
