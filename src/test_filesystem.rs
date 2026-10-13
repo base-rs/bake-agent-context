@@ -156,3 +156,37 @@ pub(crate) fn copy(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<u
     check_failure(Operation::Copy, from.as_ref())?;
     std::fs::copy(from, to)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dropping_a_guard_preserves_other_threads_failures() {
+        let current_thread = std::thread::current().id();
+        let current_guard = fail_once(Operation::Read, |_| true);
+
+        let other_thread = std::thread::spawn(|| {
+            let guard = fail_once(Operation::Read, |_| true);
+            let thread = std::thread::current().id();
+            drop(guard);
+            thread
+        })
+        .join()
+        .unwrap();
+
+        let failures = FAILURES.lock().unwrap();
+        assert!(
+            failures
+                .iter()
+                .any(|failure| failure.thread == current_thread)
+        );
+        assert!(
+            !failures
+                .iter()
+                .any(|failure| failure.thread == other_thread)
+        );
+        drop(failures);
+        drop(current_guard);
+    }
+}
