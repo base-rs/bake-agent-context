@@ -23,18 +23,18 @@ fn skill_definitions(
     installer: &Installer,
     selector: Option<&str>,
 ) -> bake::Result<Vec<SkillDefinition>> {
-    let packages = if let Some(selector) = selector {
-        let Some(provider) = installer.find_provider(selector)? else {
+    let specifications = if let Some(selector) = selector {
+        let Some(specification) = installer.find_specification(selector)? else {
             return Ok(Vec::new());
         };
-        vec![provider]
+        vec![specification]
     } else {
-        installer.providers().to_vec()
+        installer.specifications().to_vec()
     };
 
     let mut skills = Vec::new();
-    for provider in packages {
-        for definition in Package::load(provider)?.definitions {
+    for specification in specifications {
+        for definition in Package::load(specification)?.definitions {
             if let Definition::Skill(skill) = definition {
                 skills.push(skill);
             }
@@ -158,13 +158,16 @@ fn lists_context_definitions_with_skill_markers() {
 
     let installer = Installer::discover(&root).unwrap();
 
-    let providers = installer.providers();
-    assert_eq!(providers.len(), 1);
-    assert_eq!(providers[0].selector(), "docs-provider");
-    assert_eq!(providers[0].version, "1.2.3");
+    let specifications = installer.specifications();
+    assert_eq!(specifications.len(), 1);
+    assert_eq!(specifications[0].selector(), "docs-provider");
+    assert_eq!(specifications[0].version, "1.2.3");
 
-    let provider = installer.find_provider("docs-provider").unwrap().unwrap();
-    let definitions = Package::load(provider).unwrap().definitions;
+    let specification = installer
+        .find_specification("docs-provider")
+        .unwrap()
+        .unwrap();
+    let definitions = Package::load(specification).unwrap().definitions;
     let names: Vec<_> = definitions.iter().map(Definition::display_name).collect();
     assert_eq!(
         names,
@@ -582,7 +585,7 @@ fn discovers_multiple_context_providers_and_orders_their_skills() {
     let installer = Installer::discover(&root).unwrap();
     assert_eq!(
         installer
-            .providers()
+            .specifications()
             .iter()
             .map(|package| package.name.as_str())
             .collect::<Vec<_>>(),

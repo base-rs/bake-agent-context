@@ -33,40 +33,40 @@ pub fn list(context: &mut Context, package: Option<String>) -> Result<String> {
     let installer = installer(context)?;
 
     if let Some(package) = package {
-        let Some(provider) = installer.find_provider(&package)? else {
+        let Some(specification) = installer.find_specification(&package)? else {
             return Ok(format!("No context found for crate '{package}'"));
         };
 
-        let package = Package::load(provider.clone())?;
+        let package = Package::load(specification.clone())?;
         if package.definitions.is_empty() {
             return Ok(format!(
                 "No context definitions found for crate '{}'.",
-                provider.selector()
+                specification.selector()
             ));
         }
-        let mut output = format!("Context files for crate '{}':", provider.selector());
+        let mut output = format!("Context files for crate '{}':", specification.selector());
         for definition in package.definitions {
             output.push_str(&format!("\n  {}", definition.display_name()));
         }
         return Ok(output);
     }
 
-    let mut providers = Vec::new();
-    for provider in installer.providers() {
-        if !Package::load(provider.clone())?.definitions.is_empty() {
-            providers.push(provider);
+    let mut specifications = Vec::new();
+    for specification in installer.specifications() {
+        if !Package::load(specification.clone())?.definitions.is_empty() {
+            specifications.push(specification);
         }
     }
-    if providers.is_empty() {
+    if specifications.is_empty() {
         return Ok("No dependency context files found".to_owned());
     }
 
     let mut output = String::from("Crates with context available:");
-    for provider in providers {
+    for specification in specifications {
         output.push_str(&format!(
             "\n  {} ({})",
-            provider.selector(),
-            provider.version
+            specification.selector(),
+            specification.version
         ));
     }
     Ok(output)
@@ -121,13 +121,13 @@ mod tests {
     use std::path::Path;
     use tempfile::tempdir;
 
-    fn make_context(root: &Path, providers: Vec<Specification>) -> Context {
+    fn make_context(root: &Path, specifications: Vec<Specification>) -> Context {
         let mut context = bake::Registry::new().context(root);
-        context.insert(Installer::for_test(root, providers));
+        context.insert(Installer::for_test(root, specifications));
         context
     }
 
-    fn provider(root: &Path, name: &str, version: &str) -> Specification {
+    fn specification(root: &Path, name: &str, version: &str) -> Specification {
         Specification::for_test(name, version, root.join(name).join("context"))
     }
 
@@ -140,7 +140,7 @@ mod tests {
     fn task_wrappers_return_outputs_and_propagate_errors() {
         let directory = tempdir().unwrap();
         let root = directory.path();
-        let guide = provider(root, "provider", "1.0.0");
+        let guide = specification(root, "provider", "1.0.0");
         write(&guide.context_path.join("guide.md"), "# Guide\n");
         write(
             &guide.context_path.join("broken.md"),
@@ -162,8 +162,8 @@ mod tests {
         let mut duplicates = make_context(
             root,
             vec![
-                provider(root, "duplicate", "1.0.0"),
-                provider(root, "duplicate", "2.0.0"),
+                specification(root, "duplicate", "1.0.0"),
+                specification(root, "duplicate", "2.0.0"),
             ],
         );
         assert!(list(&mut duplicates, Some("duplicate".to_owned())).is_err());
@@ -183,7 +183,7 @@ mod tests {
                 .is_err()
         );
 
-        let listing_package = provider(root, "listing", "1.0.0");
+        let listing_package = specification(root, "listing", "1.0.0");
         write(
             &listing_package.context_path.join("guide.md"),
             "# Listing\n",
@@ -195,7 +195,7 @@ mod tests {
                 .contains("listing@1.0.0 (1.0.0)")
         );
 
-        let empty_package = provider(root, "empty", "1.0.0");
+        let empty_package = specification(root, "empty", "1.0.0");
         fs::create_dir_all(&empty_package.context_path).unwrap();
         let mut empty_context = make_context(root, vec![empty_package]);
         assert_eq!(
@@ -213,8 +213,8 @@ mod tests {
     fn task_wrappers_propagate_install_failures() {
         let directory = tempdir().unwrap();
         let root = directory.path();
-        let provider = provider(root, "provider", "1.0.0");
-        write(&provider.context_path.join("guide.md"), "# Guide\n");
+        let specification = specification(root, "provider", "1.0.0");
+        write(&specification.context_path.join("guide.md"), "# Guide\n");
 
         let ownership = root.join(".agents/skills/provider-workflow/SKILL.md");
         write(
@@ -225,7 +225,7 @@ mod tests {
         let _failure = test_filesystem::fail_once(test_filesystem::Operation::Read, move |path| {
             path == failure_path
         });
-        let mut context = make_context(root, vec![provider.clone()]);
+        let mut context = make_context(root, vec![specification.clone()]);
         assert!(install(&mut context, Some("provider".to_owned())).is_err());
         drop(_failure);
 

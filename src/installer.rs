@@ -99,7 +99,7 @@ pub struct Installation {
 pub struct Installer {
     root: PathBuf,
     context_path: PathBuf,
-    providers: Vec<Specification>,
+    specifications: Vec<Specification>,
 }
 
 impl Installer {
@@ -126,11 +126,11 @@ impl Installer {
     }
 
     #[cfg(test)]
-    pub(super) fn for_test(root: &Path, providers: Vec<Specification>) -> Self {
+    pub(super) fn for_test(root: &Path, specifications: Vec<Specification>) -> Self {
         Self {
             root: root.to_path_buf(),
             context_path: root.join(".agents/context"),
-            providers,
+            specifications,
         }
     }
 
@@ -181,14 +181,16 @@ impl Installer {
         }
 
         let mut name_counts = HashMap::new();
-        for provider in &candidates {
-            *name_counts.entry(provider.name.clone()).or_insert(0usize) += 1;
+        for specification in &candidates {
+            *name_counts
+                .entry(specification.name.clone())
+                .or_insert(0usize) += 1;
         }
-        for provider in &mut candidates {
-            provider.selector = if name_counts[&provider.name] == 1 {
-                provider.name.clone()
+        for specification in &mut candidates {
+            specification.selector = if name_counts[&specification.name] == 1 {
+                specification.name.clone()
             } else {
-                format!("{}@{}", provider.name, provider.version)
+                format!("{}@{}", specification.name, specification.version)
             };
         }
         candidates.sort_by(|left, right| {
@@ -200,7 +202,7 @@ impl Installer {
         Ok(Self {
             context_path: root.join(".agents/context"),
             root,
-            providers: candidates,
+            specifications: candidates,
         })
     }
 
@@ -212,24 +214,26 @@ impl Installer {
         &self.context_path
     }
 
-    pub fn providers(&self) -> &[Specification] {
-        &self.providers
+    pub fn specifications(&self) -> &[Specification] {
+        &self.specifications
     }
 
-    pub fn find_provider(&self, selector: &str) -> Result<Option<Specification>> {
+    pub fn find_specification(&self, selector: &str) -> Result<Option<Specification>> {
         let matches: Vec<_> = self
-            .providers
+            .specifications
             .iter()
-            .filter(|provider| provider.selector == selector || provider.name == selector)
+            .filter(|specification| {
+                specification.selector == selector || specification.name == selector
+            })
             .collect();
 
         match matches.as_slice() {
             [] => Ok(None),
-            [provider] => Ok(Some((*provider).clone())),
+            [specification] => Ok(Some((*specification).clone())),
             _ => {
                 let selectors = matches
                     .iter()
-                    .map(|provider| provider.selector.as_str())
+                    .map(|specification| specification.selector.as_str())
                     .collect::<Vec<_>>()
                     .join(", ");
                 Err(Error::new(format!(
@@ -241,11 +245,11 @@ impl Installer {
 
     /// Show an ordinary document or opaque resource from a provider.
     pub fn show_context_file(&self, selector: &str, file: &str) -> Result<Option<String>> {
-        let Some(provider) = self.find_provider(selector)? else {
+        let Some(specification) = self.find_specification(selector)? else {
             return Ok(None);
         };
-        let selected_file = find_context_file_with_root(&provider.context_path, file)?;
-        let package = Package::load(provider)?;
+        let selected_file = find_context_file_with_root(&specification.context_path, file)?;
+        let package = Package::load(specification)?;
 
         // Skills are shown by their installed name through the same task:
         if let Some(skill) = package
@@ -284,17 +288,17 @@ impl Installer {
     /// Install context and skills from the same loaded provider documents.
     pub fn install(&self, selector: Option<&str>) -> Result<Installation> {
         // Resolve the requested scope and load each provider once:
-        let providers =
+        let specifications =
             if let Some(selector) = selector {
-                vec![self.find_provider(selector)?.ok_or_else(|| {
+                vec![self.find_specification(selector)?.ok_or_else(|| {
                     Error::new(format!("no context found for crate {selector:?}"))
                 })?]
             } else {
-                self.providers.clone()
+                self.specifications.clone()
             };
-        let loaded = providers
+        let loaded = specifications
             .iter()
-            .map(|provider| Package::load(provider.clone()))
+            .map(|specification| Package::load(specification.clone()))
             .collect::<Result<Vec<_>>>()?;
         let definitions: Vec<_> = loaded
             .iter()
@@ -305,8 +309,8 @@ impl Installer {
             })
             .collect();
         let package = selector
-            .and_then(|_| providers.first())
-            .map(|provider| provider.name.as_str());
+            .and_then(|_| specifications.first())
+            .map(|specification| specification.name.as_str());
 
         // Apply skill installation rules, then write ordinary definitions:
         let skills = super::skill::install_definitions(&self.root, &definitions, package, true)?;
@@ -596,23 +600,23 @@ mod tests {
         assert_eq!(installer.context_path(), root.join(".agents/context"));
         assert_eq!(
             installer
-                .providers()
+                .specifications()
                 .iter()
                 .map(Specification::selector)
                 .collect::<Vec<_>>(),
             ["duplicate@1.0.0", "duplicate@2.0.0"]
         );
-        assert!(installer.find_provider("missing").unwrap().is_none());
+        assert!(installer.find_specification("missing").unwrap().is_none());
         assert!(
             installer
-                .find_provider("duplicate")
+                .find_specification("duplicate")
                 .unwrap_err()
                 .to_string()
                 .contains("duplicate@1.0.0, duplicate@2.0.0")
         );
         assert_eq!(
             installer
-                .find_provider("duplicate@2.0.0")
+                .find_specification("duplicate@2.0.0")
                 .unwrap()
                 .unwrap()
                 .version,
@@ -649,8 +653,8 @@ mod tests {
             resolve: None,
         };
         let installer = Installer::discover_from_metadata(root.to_path_buf(), metadata).unwrap();
-        assert_eq!(installer.providers().len(), 1);
-        assert_eq!(installer.providers()[0].selector(), "valid");
+        assert_eq!(installer.specifications().len(), 1);
+        assert_eq!(installer.specifications()[0].selector(), "valid");
     }
 
     #[cfg(unix)]

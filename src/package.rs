@@ -35,7 +35,7 @@ impl Package {
     }
 
     fn load_directory(
-        provider: &Specification,
+        specification: &Specification,
         definitions: &mut Vec<Definition>,
         directory: &Path,
     ) -> Result<()> {
@@ -62,11 +62,12 @@ impl Package {
                     && document.is_skill()
                 {
                     definitions.push(Definition::Skill(SkillDefinition::from_document(
-                        provider, document,
+                        specification,
+                        document,
                     )?));
                 } else {
                     let relative = path
-                        .strip_prefix(&provider.context_path)
+                        .strip_prefix(&specification.context_path)
                         .expect("context files belong to their package")
                         .to_owned();
                     definitions.push(Definition::File(FileDefinition {
@@ -82,11 +83,11 @@ impl Package {
         for directory in directories {
             if !definitions.iter().any(|definition| match definition {
                 Definition::Skill(skill) => {
-                    directory == provider.context_path.join(&skill.source_name)
+                    directory == specification.context_path.join(&skill.source_name)
                 }
                 Definition::File(_) => false,
             }) {
-                Self::load_directory(provider, definitions, &directory)?;
+                Self::load_directory(specification, definitions, &directory)?;
             }
         }
         Ok(())
@@ -141,8 +142,8 @@ mod tests {
         fs::write(source.join("image.bin"), [0, 255]).unwrap();
         #[cfg(unix)]
         std::os::unix::fs::symlink("guide.md", source.join("linked.md")).unwrap();
-        let provider = Specification::for_test("provider", "1.0.0", source.clone());
-        let loaded = Package::load(provider).unwrap();
+        let specification = Specification::for_test("provider", "1.0.0", source.clone());
+        let loaded = Package::load(specification).unwrap();
         assert_eq!(loaded.specification.name, "provider");
         fs::write(source.join("guide.md"), "# Changed\n").unwrap();
         let destination = directory.path().join("installed");
@@ -175,7 +176,7 @@ mod tests {
         let source = directory.path().join("context");
         fs::create_dir(&source).unwrap();
         fs::write(source.join("guide.md"), "# Guide\n").unwrap();
-        let provider = Specification::for_test("provider", "1.0.0", source.clone());
+        let specification = Specification::for_test("provider", "1.0.0", source.clone());
         for (operation, path) in [
             (Operation::ReadDirectory, source.clone()),
             (Operation::ReadDirectoryEntry, source.clone()),
@@ -183,7 +184,7 @@ mod tests {
         ] {
             let _failure = fail_once(operation, move |candidate| candidate == path);
             assert!(
-                Package::load(provider.clone())
+                Package::load(specification.clone())
                     .err()
                     .unwrap()
                     .to_string()

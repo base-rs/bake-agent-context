@@ -19,7 +19,7 @@ pub struct SkillDefinition {
     /// Authored or derived name used for the installed directory.
     pub name: String,
     pub description: String,
-    pub provider: Specification,
+    pub specification: Specification,
     pub(crate) source_name: String,
     assets: Option<PathBuf>,
     content: String,
@@ -28,7 +28,7 @@ pub struct SkillDefinition {
 impl SkillDefinition {
     /// The package selector accepted by `--package`.
     pub fn package_selector(&self) -> &str {
-        self.provider.selector()
+        self.specification.selector()
     }
 
     /// Installed instructions, including provider metadata.
@@ -37,9 +37,12 @@ impl SkillDefinition {
     }
 
     /// Apply skill-specific rules to a parsed document.
-    pub(crate) fn from_document(provider: &Specification, document: &Document) -> Result<Self> {
+    pub(crate) fn from_document(
+        specification: &Specification,
+        document: &Document,
+    ) -> Result<Self> {
         let source = &document.path;
-        if source.parent() != Some(provider.context_path.as_path()) {
+        if source.parent() != Some(specification.context_path.as_path()) {
             return Err(Error::new(format!(
                 "skill document {} must be directly inside context/",
                 source.display()
@@ -52,7 +55,7 @@ impl SkillDefinition {
             Some(Value::String(name)) => name.clone(),
             None => format!(
                 "{}-{source_name}",
-                provider.name.to_ascii_lowercase().replace('_', "-")
+                specification.name.to_ascii_lowercase().replace('_', "-")
             ),
             _ => {
                 return Err(Error::new(format!(
@@ -76,20 +79,20 @@ impl SkillDefinition {
             .to_owned();
 
         // Add resolved provenance while retaining the provider's remaining metadata:
-        let assets = skill_assets_path(&provider.context_path, &source_name)?;
+        let assets = skill_assets_path(&specification.context_path, &source_name)?;
         let mut frontmatter = document.frontmatter.clone();
         frontmatter.insert("name".into(), name.clone().into());
         let mut metadata = document.metadata().cloned().unwrap_or_default();
         metadata.insert("ecosystem".into(), "cargo".into());
-        metadata.insert("package".into(), provider.name.clone().into());
-        metadata.insert("version".into(), provider.version.clone().into());
+        metadata.insert("package".into(), specification.name.clone().into());
+        metadata.insert("version".into(), specification.version.clone().into());
         frontmatter.insert("metadata".into(), Value::Mapping(metadata));
         let content = document.render(frontmatter);
 
         Ok(Self {
             name,
             description,
-            provider: provider.clone(),
+            specification: specification.clone(),
             source_name,
             assets,
             content,
@@ -156,7 +159,7 @@ pub(crate) fn install_definitions(
         let destination = skills_root.join(&skill.name);
         if path_exists(&destination)?
             && owners.get(&skill.name).is_none_or(|owner| {
-                owner.ecosystem != "cargo" || owner.package != skill.provider.name
+                owner.ecosystem != "cargo" || owner.package != skill.specification.name
             })
         {
             return Err(Error::new(format!(
@@ -312,28 +315,28 @@ mod tests {
     use tempfile::tempdir;
 
     fn list_skills(installer: &Installer, selector: Option<&str>) -> Result<Vec<SkillDefinition>> {
-        let providers = if let Some(selector) = selector {
-            let Some(provider) = installer.find_provider(selector)? else {
+        let specifications = if let Some(selector) = selector {
+            let Some(specification) = installer.find_specification(selector)? else {
                 return Ok(Vec::new());
             };
-            vec![provider]
+            vec![specification]
         } else {
-            installer.providers().to_vec()
+            installer.specifications().to_vec()
         };
 
         let mut skills = Vec::new();
-        for provider in providers {
-            for definition in Package::load(provider)?.definitions {
+        for specification in specifications {
+            for definition in Package::load(specification)?.definitions {
                 if let Definition::Skill(skill) = definition {
                     skills.push(skill);
                 }
             }
         }
         skills.sort_by(|left, right| {
-            left.provider
+            left.specification
                 .name
-                .cmp(&right.provider.name)
-                .then_with(|| left.provider.version.cmp(&right.provider.version))
+                .cmp(&right.specification.name)
+                .then_with(|| left.specification.version.cmp(&right.specification.version))
                 .then_with(|| left.name.cmp(&right.name))
         });
         Ok(skills)
@@ -342,14 +345,16 @@ mod tests {
     fn install_skills(installer: &Installer, selector: Option<&str>) -> Result<Vec<String>> {
         let skills = list_skills(installer, selector)?;
         let package = if selector.is_some() {
-            skills.first().map(|skill| skill.provider.name.as_str())
+            skills
+                .first()
+                .map(|skill| skill.specification.name.as_str())
         } else {
             None
         };
         install_definitions(installer.root(), &skills, package, true)
     }
 
-    fn provider(root: &Path, name: &str, version: &str) -> Specification {
+    fn specification(root: &Path, name: &str, version: &str) -> Specification {
         let path = root.join(format!("{name}-{version}/context"));
         fs::create_dir_all(&path).unwrap();
         Specification::for_test(name, version, path)
@@ -371,7 +376,7 @@ mod tests {
     #[test]
     fn preserves_authored_names_descriptions_and_metadata() {
         let directory = tempdir().unwrap();
-        let package = provider(directory.path(), "provider", "2.0.0");
+        let package = specification(directory.path(), "provider", "2.0.0");
         fs::write(
             package.context_path.join("workflow.md"),
             include_str!("../tests/fixtures/SKILL.md"),
@@ -404,9 +409,9 @@ mod tests {
     fn sorts_providers_and_detects_ambiguous_installed_names() {
         let directory = tempdir().unwrap();
         let root = directory.path();
-        let first = provider(root, "a_provider", "1.0.0");
-        let second = provider(root, "a_provider", "2.0.0");
-        let last = provider(root, "z-provider", "1.0.0");
+        let first = specification(root, "a_provider", "1.0.0");
+        let second = specification(root, "a_provider", "2.0.0");
+        let last = specification(root, "z-provider", "1.0.0");
         fs::write(first.context_path.join("guide.md"), "# Guide\n").unwrap();
         for package in [&last, &second, &first] {
             write_skill(package, "zeta", "description: Zeta.\n", "Z");
@@ -420,7 +425,7 @@ mod tests {
         );
         let skills = list_skills(&installer, None).unwrap();
         assert_eq!(skills[0].name, "a-provider-alpha");
-        assert_eq!(skills[0].provider.version, "1.0.0");
+        assert_eq!(skills[0].specification.version, "1.0.0");
         assert_eq!(skills.last().unwrap().name, "z-provider-zeta");
         assert!(
             install_skills(&installer, None)
@@ -435,7 +440,7 @@ mod tests {
     #[test]
     fn validates_names_and_description_boundaries() {
         let directory = tempdir().unwrap();
-        let package = provider(directory.path(), "provider", "1.0.0");
+        let package = specification(directory.path(), "provider", "1.0.0");
         let installer = Installer::for_test(directory.path(), vec![package.clone()]);
         for fields in [
             "name: 123\ndescription: Valid.\n".to_owned(),
@@ -469,7 +474,7 @@ mod tests {
     fn reconciles_only_the_selected_ecosystem_and_package() {
         let directory = tempdir().unwrap();
         let root = directory.path();
-        let package = provider(root, "provider", "1.0.0");
+        let package = specification(root, "provider", "1.0.0");
         write_skill(&package, "workflow", "description: Workflow.\n", "Body");
         let installer = Installer::for_test(root, vec![package.clone()]);
         let skills = root.join(".agents/skills");
@@ -491,7 +496,7 @@ mod tests {
     #[test]
     fn rejects_other_providers_and_accepts_the_same_owner_at_a_new_version() {
         let directory = tempdir().unwrap();
-        let package = provider(directory.path(), "provider", "2.0.0");
+        let package = specification(directory.path(), "provider", "2.0.0");
         write_skill(&package, "workflow", "description: Workflow.\n", "Body");
         let installer = Installer::for_test(directory.path(), vec![package]);
         let destination = directory.path().join(".agents/skills/provider-workflow");
@@ -511,7 +516,7 @@ mod tests {
     #[test]
     fn resource_failure_leaves_identifiable_progress_and_retry_refreshes_it() {
         let directory = tempdir().unwrap();
-        let package = provider(directory.path(), "provider", "1.0.0");
+        let package = specification(directory.path(), "provider", "1.0.0");
         write_skill(&package, "workflow", "description: Workflow.\n", "Body");
         let resources = package.context_path.join("workflow");
         fs::create_dir_all(resources.join("references")).unwrap();
@@ -565,7 +570,7 @@ mod tests {
     fn instruction_write_failure_cleans_the_directory_and_retry_succeeds() {
         let directory = tempdir().unwrap();
         let root = directory.path();
-        let package = provider(root, "provider", "1.0.0");
+        let package = specification(root, "provider", "1.0.0");
         write_skill(&package, "workflow", "description: Workflow.\n", "Body");
         let installer = Installer::for_test(root, vec![package]);
         let destination = root.join(".agents/skills/provider-workflow");
@@ -593,7 +598,7 @@ mod tests {
         use filesystem::Operation;
         let directory = tempdir().unwrap();
         let root = directory.path();
-        let package = provider(root, "provider", "1.0.0");
+        let package = specification(root, "provider", "1.0.0");
         write_skill(&package, "workflow", "description: Workflow.\n", "Body");
         let installer = Installer::for_test(root, vec![package.clone()]);
         let skills = root.join(".agents/skills");
@@ -636,11 +641,11 @@ mod tests {
     }
 
     #[test]
-    fn reports_resource_failures_and_keeps_the_provider_identity() {
+    fn reports_resource_failures_and_keeps_the_specification_identity() {
         use filesystem::Operation;
         let directory = tempdir().unwrap();
         let root = directory.path();
-        let package = provider(root, "provider", "1.0.0");
+        let package = specification(root, "provider", "1.0.0");
         write_skill(&package, "workflow", "description: Workflow.\n", "Body");
         let resources = package.context_path.join("workflow");
         fs::create_dir_all(resources.join("references")).unwrap();
@@ -681,7 +686,7 @@ mod tests {
                 .unwrap()
                 .success()
         );
-        let package = provider(root, "provider", "1.0.0");
+        let package = specification(root, "provider", "1.0.0");
         write_skill(&package, "workflow", "description: Workflow.\n", "Body");
         let installer = Installer::for_test(root, vec![package]);
         let exclude = root.join(".git/info/exclude");
@@ -708,7 +713,7 @@ mod tests {
     fn rejects_non_utf8_skill_filenames() {
         use std::os::unix::ffi::OsStringExt;
         let directory = tempdir().unwrap();
-        let package = provider(directory.path(), "provider", "1.0.0");
+        let package = specification(directory.path(), "provider", "1.0.0");
         let name = std::ffi::OsString::from_vec(b"invalid-\xff.md".to_vec());
         let document = Document::parse(
             "---\nmetadata: {type: skill}\ndescription: Workflow.\n---\n".to_owned(),
