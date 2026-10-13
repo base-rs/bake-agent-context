@@ -1,7 +1,7 @@
 // Released under the MIT License.
 // Copyright, 2026, by Samuel Williams.
 
-use super::document::ContextDocument;
+use super::document::Document;
 use super::skill::validate_skill_name;
 #[cfg(test)]
 use super::test_filesystem as filesystem;
@@ -39,7 +39,7 @@ fn load_skill_owner(directory: &Path) -> Result<Option<SkillOwner>> {
             )));
         }
     }
-    let document = ContextDocument::load(&path)?;
+    let document = Document::load(&path)?;
     let Some(metadata) = document.metadata() else {
         return Ok(None);
     };

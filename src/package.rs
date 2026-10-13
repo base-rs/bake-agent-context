@@ -1,7 +1,7 @@
 // Released under the MIT License.
 // Copyright, 2026, by Samuel Williams.
 
-use super::document::ContextDocument;
+use super::document::Document;
 use super::installer::{ContextDefinition, Definition, Provider};
 use super::skill::Skill;
 #[cfg(test)]
@@ -52,7 +52,7 @@ impl Package {
                     .extension()
                     .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
                 {
-                    Some(ContextDocument::load(&path)?)
+                    Some(Document::load(&path)?)
                 } else {
                     None
                 };

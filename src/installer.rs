@@ -49,7 +49,7 @@ pub struct Definition {
     /// The path relative to the provider's `context/` directory.
     pub path: PathBuf,
     pub(crate) source: PathBuf,
-    pub(crate) document: Option<super::document::ContextDocument>,
+    pub(crate) document: Option<super::document::Document>,
 }
 
 /// One loaded ordinary context file or skill definition.

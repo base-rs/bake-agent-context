@@ -1,7 +1,7 @@
 // Released under the MIT License.
 // Copyright, 2026, by Samuel Williams.
 
-use super::document::ContextDocument;
+use super::document::Document;
 use super::installer::{Provider, remove_existing};
 use super::ownership::installed_skill_owners;
 #[cfg(test)]
@@ -37,7 +37,7 @@ impl Skill {
     }
 
     /// Apply skill-specific rules to a parsed document.
-    pub(crate) fn from_document(provider: &Provider, document: &ContextDocument) -> Result<Self> {
+    pub(crate) fn from_document(provider: &Provider, document: &Document) -> Result<Self> {
         let source = &document.path;
         if source.parent() != Some(provider.context_path.as_path()) {
             return Err(Error::new(format!(
@@ -710,7 +710,7 @@ mod tests {
         let directory = tempdir().unwrap();
         let package = provider(directory.path(), "provider", "1.0.0");
         let name = std::ffi::OsString::from_vec(b"invalid-\xff.md".to_vec());
-        let document = ContextDocument::parse(
+        let document = Document::parse(
             "---\nmetadata: {type: skill}\ndescription: Workflow.\n---\n".to_owned(),
             &package.context_path.join(name),
         )

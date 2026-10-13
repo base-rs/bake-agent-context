@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 /// A Markdown source and its parsed YAML front matter.
 #[derive(Clone, Debug)]
-pub(crate) struct ContextDocument {
+pub(crate) struct Document {
     pub(crate) path: PathBuf,
     pub(crate) content: String,
     pub(crate) frontmatter: Mapping,
@@ -20,7 +20,7 @@ pub(crate) struct ContextDocument {
     body_start: usize,
 }
 
-impl ContextDocument {
+impl Document {
     /// Read and parse a context document.
     pub(crate) fn load(path: &Path) -> Result<Self> {
         let content = fs::read_to_string(path)
@@ -127,14 +127,13 @@ mod tests {
         let fixture = include_str!("../tests/fixtures/SKILL.md");
         for ending in ["\n", "\r\n"] {
             let source = fixture.replace('\n', ending);
-            let document =
-                ContextDocument::parse(source.clone(), Path::new("workflow.md")).unwrap();
+            let document = Document::parse(source.clone(), Path::new("workflow.md")).unwrap();
             assert!(document.is_skill());
             let body = &source[document.body_start..];
             let mut metadata = document.frontmatter.clone();
             metadata.insert("license".into(), "Apache-2.0".into());
             let output = document.render(metadata);
-            let installed = ContextDocument::parse(output, Path::new("SKILL.md")).unwrap();
+            let installed = Document::parse(output, Path::new("SKILL.md")).unwrap();
             assert_eq!(&installed.content[installed.body_start..], body);
             assert_eq!(
                 installed.frontmatter["license"].as_str(),
@@ -163,8 +162,7 @@ mod tests {
             ("---\ntype: skill\nmetadata: unrelated\n---\n", false),
             ("# Guide\n\n---\n", false),
         ] {
-            let document =
-                ContextDocument::parse(source.to_owned(), Path::new("guide.md")).unwrap();
+            let document = Document::parse(source.to_owned(), Path::new("guide.md")).unwrap();
             assert_eq!(document.is_skill(), skill, "{source}");
             if skill {
                 assert!(
@@ -176,7 +174,7 @@ mod tests {
         }
         for source in ["---\n[]\n---\n", "---\n[invalid\n---\n"] {
             assert!(
-                ContextDocument::parse(source.to_owned(), Path::new("broken.md"))
+                Document::parse(source.to_owned(), Path::new("broken.md"))
                     .unwrap_err()
                     .to_string()
                     .contains("broken.md")
