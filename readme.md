@@ -65,6 +65,20 @@ Prepare a release with `cargo bake cargo:version:patch` (or `minor`, `major`, or
 
 See [releases.md](releases.md) for the full release history.
 
+### v0.4.0
+
+- Resolve context source filenames before installed skill names and show authored content consistently.
+
+- Install unfamiliar context types as ordinary guidance so providers can introduce new types.
+
+- Store resolved skill provenance in `SKILL.md` front matter under `metadata`, with `metadata.type: skill` declaring skills.
+
+- Preserve authored names, descriptions, additional metadata, and the original Markdown body using native front matter AST nodes.
+
+- Share loaded documents between context and skill installation, and use direct writes with rerunnable progress.
+
+- Discover dependency guidance through installed Markdown files and the list/show commands. Remove generated indexes and the `agent:context:index` task.
+
 ### v0.3.3
 
 - Use Cargo-selected dependency versions and generated task links in setup instructions.
@@ -74,10 +88,6 @@ See [releases.md](releases.md) for the full release history.
 - Adopt `socketry-project` 0.3.7 for shared project tasks and Markdown normalization.
 - Require the aggregate test and coverage result for pull request merges.
 - Refresh dependency examples and repository-owned agent guidance.
-
-### v0.3.1
-
-- Require `socketry-markdown` 0.2.0 or newer for safe inline Markdown serialization.
 
 <!-- bake-readme:releases:end -->
 
