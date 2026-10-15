@@ -14,7 +14,7 @@ Read `.agents/conventions.md` before changing this repository.
 - YAML front matter with `metadata.type: skill` opts a root-level document into skill installation. Its authored name and description are preserved; missing names derive from the package name and source filename.
 - Installed `SKILL.md` front matter records `metadata.ecosystem`, `metadata.package`, and `metadata.version`. These fields identify provider ownership during refresh and stale-skill reconciliation.
 - `Specification` holds resolved Cargo package metadata and its context path. `Package` loads ordinary and skill definitions together, using `Document` to parse Markdown and keeping companion resources opaque. `Definition` combines `FileDefinition` and `SkillDefinition`.
-- `Installer::specifications()` and `find_specification()` expose discovered package specifications. `Installer::install` coordinates their distinct destinations and returns names for task presentation.
+- `Installer::providers()` and `find_provider()` expose loaded packages; `Package::find_definition()` resolves source paths before installed skill names. `specifications()` and `find_specification()` expose Cargo metadata. `Installer::install` coordinates their distinct destinations and returns names for task presentation.
 - Task names keep the Ruby-compatible `agent:context:*` namespace.
 - `cargo metadata` is run from the project root and cached within a Bake task chain.
 

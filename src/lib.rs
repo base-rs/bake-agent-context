@@ -32,41 +32,37 @@ fn installer(context: &mut Context) -> Result<Installer> {
 pub fn list(context: &mut Context, package: Option<String>) -> Result<String> {
     let installer = installer(context)?;
 
-    if let Some(package) = package {
-        let Some(specification) = installer.find_specification(&package)? else {
-            return Ok(format!("No context found for crate '{package}'"));
+    if let Some(selector) = package {
+        let Some(provider) = installer.find_provider(&selector)? else {
+            return Ok(format!("No context found for crate '{selector}'"));
         };
-
-        let package = Package::load(specification.clone())?;
-        if package.definitions.is_empty() {
+        if provider.definitions.is_empty() {
             return Ok(format!(
-                "No context definitions found for crate '{}'.",
-                specification.selector()
+                "No context definitions found for crate '{selector}'."
             ));
         }
-        let mut output = format!("Context files for crate '{}':", specification.selector());
-        for definition in package.definitions {
+        let mut output = format!("Context files for crate '{selector}':");
+        for definition in provider.definitions {
             output.push_str(&format!("\n  {}", definition.display_name()));
         }
         return Ok(output);
     }
 
-    let mut specifications = Vec::new();
-    for specification in installer.specifications() {
-        if !Package::load(specification.clone())?.definitions.is_empty() {
-            specifications.push(specification);
-        }
-    }
-    if specifications.is_empty() {
+    let providers = installer.providers()?;
+    let providers: Vec<_> = providers
+        .iter()
+        .filter(|provider| !provider.definitions.is_empty())
+        .collect();
+    if providers.is_empty() {
         return Ok("No dependency context files found".to_owned());
     }
 
     let mut output = String::from("Crates with context available:");
-    for specification in specifications {
+    for provider in providers {
         output.push_str(&format!(
             "\n  {} ({})",
-            specification.selector(),
-            specification.version
+            provider.specification.selector(),
+            provider.specification.version
         ));
     }
     Ok(output)
@@ -200,7 +196,7 @@ mod tests {
         let mut empty_context = make_context(root, vec![empty_package]);
         assert_eq!(
             list(&mut empty_context, Some("empty".to_owned())).unwrap(),
-            "No context definitions found for crate 'empty@1.0.0'."
+            "No context definitions found for crate 'empty'."
         );
         assert!(
             list(&mut empty_context, None)

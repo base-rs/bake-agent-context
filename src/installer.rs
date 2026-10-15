@@ -12,7 +12,7 @@ use std::env;
 use std::ffi::{OsStr, OsString};
 #[cfg(not(test))]
 use std::fs;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Resolved package metadata for a Cargo context provider.
@@ -48,7 +48,8 @@ impl Specification {
 pub struct FileDefinition {
     /// The path relative to the provider's `context/` directory.
     pub path: PathBuf,
-    pub(crate) source: PathBuf,
+    /// The source file path.
+    pub source_path: PathBuf,
     pub(crate) document: Option<super::document::Document>,
 }
 
@@ -67,7 +68,26 @@ impl Definition {
                 .path
                 .to_string_lossy()
                 .replace(std::path::MAIN_SEPARATOR, "/"),
-            Self::Skill(skill) => format!("{} (skill)", skill.source_name),
+            Self::Skill(skill) => format!(
+                "{} (skill)",
+                skill.path.file_stem().unwrap().to_string_lossy()
+            ),
+        }
+    }
+
+    /// The source path relative to the provider's context directory.
+    pub fn path(&self) -> &Path {
+        match self {
+            Self::File(file) => &file.path,
+            Self::Skill(skill) => &skill.path,
+        }
+    }
+
+    /// Read the authored content of this definition.
+    pub fn content(&self) -> Result<String> {
+        match self {
+            Self::File(file) => file.content(),
+            Self::Skill(skill) => Ok(skill.content().to_owned()),
         }
     }
 
@@ -78,12 +98,13 @@ impl Definition {
 }
 
 impl FileDefinition {
-    fn content(&self) -> Result<String> {
+    /// Read the authored content of the file.
+    pub fn content(&self) -> Result<String> {
         if let Some(document) = &self.document {
             return Ok(document.content.clone());
         }
 
-        read_context_file(&self.source)
+        read_context_file(&self.source_path)
     }
 }
 
@@ -243,63 +264,44 @@ impl Installer {
         }
     }
 
-    /// Show an ordinary document or opaque resource from a provider.
+    /// Load providers with context directories, including empty providers.
+    pub fn providers(&self) -> Result<Vec<Package>> {
+        self.specifications
+            .iter()
+            .cloned()
+            .map(Package::load)
+            .collect()
+    }
+
+    /// Load one provider by its package selector.
+    pub fn find_provider(&self, selector: &str) -> Result<Option<Package>> {
+        self.find_specification(selector)?
+            .map(Package::load)
+            .transpose()
+    }
+
+    /// Read the authored content of a selected definition.
     pub fn show_context_file(&self, selector: &str, file: &str) -> Result<Option<String>> {
-        let Some(specification) = self.find_specification(selector)? else {
+        let Some(package) = self.find_provider(selector)? else {
             return Ok(None);
         };
-        let selected_file = find_context_file_with_root(&specification.context_path, file)?;
-        let package = Package::load(specification)?;
-
-        // Skills are shown by their installed name through the same task:
-        if let Some(skill) = package
-            .definitions
-            .iter()
-            .find_map(|definition| match definition {
-                Definition::Skill(skill)
-                    if skill.name == file
-                        || skill.source_name == file
-                        || format!("{}.md", skill.source_name) == file =>
-                {
-                    Some(skill)
-                }
-                _ => None,
-            })
-        {
-            return Ok(Some(skill.content().to_owned()));
-        }
-
-        let Some((root, path)) = selected_file else {
-            return Ok(None);
-        };
-        let relative = path
-            .strip_prefix(root)
-            .expect("resolved context paths stay within their root");
-        let definition = package
-            .definitions
-            .iter()
-            .find_map(|definition| match definition {
-                Definition::File(file) if file.path == relative => Some(file),
-                _ => None,
-            });
-        definition.map(FileDefinition::content).transpose()
+        package
+            .find_definition(file)?
+            .map(Definition::content)
+            .transpose()
     }
 
     /// Install context and skills from the same loaded provider documents.
     pub fn install(&self, selector: Option<&str>) -> Result<Installation> {
         // Resolve the requested scope and load each provider once:
-        let specifications =
+        let loaded =
             if let Some(selector) = selector {
-                vec![self.find_specification(selector)?.ok_or_else(|| {
+                vec![self.find_provider(selector)?.ok_or_else(|| {
                     Error::new(format!("no context found for crate {selector:?}"))
                 })?]
             } else {
-                self.specifications.clone()
+                self.providers()?
             };
-        let loaded = specifications
-            .iter()
-            .map(|specification| Package::load(specification.clone()))
-            .collect::<Result<Vec<_>>>()?;
         let definitions: Vec<_> = loaded
             .iter()
             .flat_map(|package| package.definitions.iter())
@@ -309,14 +311,14 @@ impl Installer {
             })
             .collect();
         let package = selector
-            .and_then(|_| specifications.first())
-            .map(|specification| specification.name.as_str());
+            .and_then(|_| loaded.first())
+            .map(|package| package.specification.name.as_str());
 
         // Apply skill installation rules, then write ordinary definitions:
         let skills = super::skill::install_definitions(&self.root, &definitions, package, true)?;
         let mut context_names = Vec::new();
         for package in loaded {
-            if package.install(&self.context_path.join(package.specification.selector()))? {
+            if package.install_files(&self.context_path.join(package.specification.selector()))? {
                 context_names.push(package.specification.selector().to_owned());
             }
         }
@@ -398,54 +400,6 @@ struct CargoPackage {
     version: String,
     description: Option<String>,
     manifest_path: PathBuf,
-}
-
-#[cfg(test)]
-fn find_context_file(context_path: &Path, file: &str) -> Result<Option<PathBuf>> {
-    Ok(find_context_file_with_root(context_path, file)?.map(|(_, path)| path))
-}
-
-fn find_context_file_with_root(
-    context_path: &Path,
-    file: &str,
-) -> Result<Option<(PathBuf, PathBuf)>> {
-    let requested = Path::new(file);
-    if requested.is_absolute()
-        || requested
-            .components()
-            .any(|component| !matches!(component, Component::Normal(_)))
-    {
-        return Err(Error::new(
-            "context file must be a relative path inside context/",
-        ));
-    }
-
-    let canonical_root = canonical_context_root(context_path)?;
-    let mut candidates = vec![context_path.join(requested)];
-    if requested.extension().is_none() {
-        candidates.push(context_path.join(requested).with_extension("md"));
-    }
-
-    for candidate in candidates {
-        let Ok(canonical_candidate) = candidate.canonicalize() else {
-            continue;
-        };
-        if !canonical_candidate.starts_with(&canonical_root) || !canonical_candidate.is_file() {
-            continue;
-        }
-        return Ok(Some((canonical_root, canonical_candidate)));
-    }
-
-    Ok(None)
-}
-
-fn canonical_context_root(context_path: &Path) -> Result<PathBuf> {
-    context_path.canonicalize().map_err(|error| {
-        Error::new(format!(
-            "cannot resolve {}: {error}",
-            context_path.display()
-        ))
-    })
 }
 
 fn read_context_file(path: &Path) -> Result<String> {
@@ -678,31 +632,87 @@ mod tests {
     }
 
     #[test]
-    fn locates_context_files_safely_and_finds_markdown_extensions() {
+    fn finds_loaded_source_paths_before_skill_names() {
         let directory = tempdir().unwrap();
         let context = directory.path().join("context");
         fs::create_dir_all(context.join("nested")).unwrap();
         fs::write(context.join("guide.md"), "guide").unwrap();
+        let source =
+            "---\nname: guide\nmetadata: {type: skill}\ndescription: Workflow.\n---\n# Workflow\n";
+        fs::write(context.join("workflow.md"), source).unwrap();
         fs::write(context.join("nested/readme.MD"), "nested").unwrap();
-        fs::create_dir(context.join("directory")).unwrap();
-        fs::write(context.join("plain.txt"), "plain").unwrap();
-
+        let specification = Specification::for_test("provider", "1.0.0", context.clone());
+        let installer = Installer::for_test(directory.path(), vec![specification]);
+        let package = installer.find_provider("provider").unwrap().unwrap();
         assert_eq!(
-            find_context_file(&context, "guide").unwrap(),
-            Some(context.join("guide.md").canonicalize().unwrap())
-        );
-        assert!(
-            find_context_file(&context, "nested/readme.MD")
+            package
+                .find_definition("guide")
                 .unwrap()
-                .is_some()
+                .unwrap()
+                .content()
+                .unwrap(),
+            "guide"
         );
-        assert_eq!(find_context_file(&context, "not-found").unwrap(), None);
-        assert_eq!(find_context_file(&context, "directory").unwrap(), None);
-        assert!(find_context_file(&context, "/etc/passwd").is_err());
-        assert!(find_context_file(&context, "./guide.md").is_err());
-        assert!(find_context_file(&context, "nested/../guide.md").is_err());
-        assert!(find_context_file(&context.join("missing"), "guide.md").is_err());
-        assert!(canonical_context_root(&context.join("does-not-exist")).is_err());
+        assert_eq!(
+            package
+                .find_definition("guide.md")
+                .unwrap()
+                .unwrap()
+                .content()
+                .unwrap(),
+            "guide"
+        );
+        assert_eq!(
+            package
+                .find_definition("workflow")
+                .unwrap()
+                .unwrap()
+                .content()
+                .unwrap(),
+            source
+        );
+        assert_eq!(
+            package
+                .find_definition("nested/readme.MD")
+                .unwrap()
+                .unwrap()
+                .content()
+                .unwrap(),
+            "nested"
+        );
+        assert!(package.find_definition("not-found").unwrap().is_none());
+        for path in ["", "/etc/passwd", "./guide.md", "nested/../guide.md"] {
+            assert!(package.find_definition(path).is_err());
+        }
+
+        // Source lookup uses the loaded snapshot, with installed names as a fallback:
+        fs::remove_file(context.join("guide.md")).unwrap();
+        assert_eq!(
+            package
+                .find_definition("guide")
+                .unwrap()
+                .unwrap()
+                .content()
+                .unwrap(),
+            "guide"
+        );
+        assert_eq!(
+            installer
+                .show_context_file("provider", "guide")
+                .unwrap()
+                .as_deref(),
+            Some(source)
+        );
+        fs::write(context.join("guide"), "exact source").unwrap();
+        fs::write(context.join("guide.md"), "markdown source").unwrap();
+        assert_eq!(
+            installer
+                .show_context_file("provider", "guide")
+                .unwrap()
+                .as_deref(),
+            Some("exact source")
+        );
+        assert!(installer.find_provider("missing").unwrap().is_none());
         assert!(read_context_file(&context).is_err());
     }
 
@@ -736,7 +746,8 @@ mod tests {
         fs::write(&outside, "secret").unwrap();
         symlink(&outside, context.join("external.md")).unwrap();
 
-        assert_eq!(find_context_file(&context, "external.md").unwrap(), None);
+        let package = Package::load(Specification::for_test("provider", "1.0.0", context)).unwrap();
+        assert!(package.find_definition("external.md").unwrap().is_none());
     }
 
     #[cfg(unix)]
@@ -787,7 +798,7 @@ mod tests {
         assert!(ambiguous.install(Some("provider")).is_err());
         let loaded = installer.install(None).unwrap();
         assert_eq!(loaded.context, ["provider@1.0.0"]);
-        assert_eq!(loaded.skills, ["provider-workflow (provider@1.0.0)"]);
+        assert_eq!(loaded.skills, ["provider-workflow"]);
         fs::remove_file(context.join("guide.md")).unwrap();
         fs::remove_file(context.join("data.txt")).unwrap();
         assert!(installer.install(None).unwrap().context.is_empty());

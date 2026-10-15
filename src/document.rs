@@ -156,6 +156,8 @@ mod tests {
             ("+++\nthis is TOML\n+++\nBody", false),
             ("---\n---", false),
             ("---\nmetadata: null\n---\n", false),
+            ("---\nmetadata: []\n---\n", false),
+            ("---\nmetadata: 42\n---\n", false),
             ("---\nmetadata: {type: null}\n---\n", false),
             ("---\nmetadata: {type: guide}\n---\n", false),
             ("---\nmetadata: {type: false}\n---\n", false),

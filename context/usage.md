@@ -16,6 +16,8 @@ Run `cargo bake agent:context:list` to see available providers. Each provider is
 
 Run `cargo bake agent:context:list --package CRATE` to list one provider's definitions. Read a guide or skill without installing it using `cargo bake agent:context:show --package CRATE --file FILE`; the `.md` extension is optional for Markdown files. Install or refresh one provider with `cargo bake agent:context:install --package CRATE`.
 
+Source filenames take precedence over installed skill names. The `show` command returns authored content, including for skills; generated installation metadata is available in the installed `SKILL.md`.
+
 Run `cargo bake agent:context:install` to install or refresh context and skills from all resolved dependencies. Ordinary files are copied under `.agents/context/SELECTOR/`, where the selector is the crate name or the displayed `crate@version` selector. Discover installed Markdown files with `rg --files --hidden --no-ignore .agents/context -g "*.md"`, then read the guides relevant to the task. Install missing guidance and refresh it after changing dependencies.
 
 The `.agents/context/` directory contains installed dependency copies. In a Git checkout, the install task maintains a marked block in `.git/info/exclude` for that directory and exact dependency-installed skill directories. Project-owned skill directories remain trackable. Repository instructions can direct agents to discover and read the installed guides. Edit provider sources and reinstall to update dependency copies.

@@ -9,7 +9,7 @@ use super::test_filesystem as fs;
 use bake::{Error, Result};
 #[cfg(not(test))]
 use std::fs;
-use std::path::Path;
+use std::path::{Component, Path};
 
 /// A loaded provider and its context definitions.
 pub struct Package {
@@ -30,7 +30,9 @@ impl Package {
             &mut package.definitions,
             &context_path,
         )?;
-        package.definitions.sort_by_key(Definition::display_name);
+        package
+            .definitions
+            .sort_by(|left, right| left.path().cmp(right.path()));
         Ok(package)
     }
 
@@ -72,7 +74,7 @@ impl Package {
                         .to_owned();
                     definitions.push(Definition::File(FileDefinition {
                         path: relative,
-                        source: path,
+                        source_path: path,
                         document,
                     }));
                 }
@@ -83,7 +85,10 @@ impl Package {
         for directory in directories {
             if !definitions.iter().any(|definition| match definition {
                 Definition::Skill(skill) => {
-                    directory == specification.context_path.join(&skill.source_name)
+                    directory
+                        == specification
+                            .context_path
+                            .join(skill.path.file_stem().unwrap())
                 }
                 Definition::File(_) => false,
             }) {
@@ -93,8 +98,37 @@ impl Package {
         Ok(())
     }
 
+    /// Find a source path, optionally omitting .md, then an installed skill name.
+    pub fn find_definition(&self, file: &str) -> Result<Option<&Definition>> {
+        let requested = Path::new(file);
+        if file.is_empty()
+            || requested.is_absolute()
+            || requested
+                .components()
+                .any(|part| !matches!(part, Component::Normal(_)))
+        {
+            return Err(Error::new(
+                "context file must be a relative path inside context/",
+            ));
+        }
+
+        let mut candidates = vec![requested.to_owned()];
+        if requested.extension().is_none() {
+            candidates.push(requested.with_extension("md"));
+        }
+        for path in candidates {
+            if let Some(definition) = self.definitions.iter().find(|item| item.path() == path) {
+                return Ok(Some(definition));
+            }
+        }
+        Ok(self
+            .definitions
+            .iter()
+            .find(|item| matches!(item, Definition::Skill(skill) if skill.name == file)))
+    }
+
     /// Refresh ordinary definitions from loaded Markdown and opaque resources.
-    pub(crate) fn install(&self, destination: &Path) -> Result<bool> {
+    pub(crate) fn install_files(&self, destination: &Path) -> Result<bool> {
         super::installer::remove_existing(destination)?;
         let files: Vec<_> = self
             .definitions
@@ -113,10 +147,10 @@ impl Package {
             if let Some(document) = &file.document {
                 document.write(&target)?;
             } else {
-                fs::copy(&file.source, &target).map_err(|error| {
+                fs::copy(&file.source_path, &target).map_err(|error| {
                     Error::new(format!(
                         "cannot copy {} to {}: {error}",
-                        file.source.display(),
+                        file.source_path.display(),
                         target.display()
                     ))
                 })?;
@@ -147,7 +181,7 @@ mod tests {
         assert_eq!(loaded.specification.name, "provider");
         fs::write(source.join("guide.md"), "# Changed\n").unwrap();
         let destination = directory.path().join("installed");
-        loaded.install(&destination).unwrap();
+        loaded.install_files(&destination).unwrap();
         assert_eq!(
             fs::read_to_string(destination.join("guide.md")).unwrap(),
             "# Original\n"
@@ -162,12 +196,41 @@ mod tests {
             let _failure = fail_once(operation, move |candidate| candidate == path);
             assert!(
                 loaded
-                    .install(&destination)
+                    .install_files(&destination)
                     .unwrap_err()
                     .to_string()
                     .contains("injected filesystem failure")
             );
         }
+    }
+
+    #[test]
+    fn preserves_skill_source_paths_and_empty_providers() {
+        let directory = tempdir().unwrap();
+        let context = directory.path().join("context");
+        fs::create_dir(&context).unwrap();
+        let specification = Specification::for_test("provider", "1.0.0", context.clone());
+        assert!(
+            Package::load(specification.clone())
+                .unwrap()
+                .definitions
+                .is_empty()
+        );
+        let source = "---\nmetadata: {type: skill}\nname: installed-name\ndescription: Workflow.\n---\n# Workflow\n";
+        fs::write(context.join("workflow.MD"), source).unwrap();
+        let package = Package::load(specification).unwrap();
+        let definition = package.find_definition("workflow.MD").unwrap().unwrap();
+        assert_eq!(definition.path(), Path::new("workflow.MD"));
+        assert_eq!(definition.content().unwrap(), source);
+        assert_eq!(
+            package
+                .find_definition("installed-name")
+                .unwrap()
+                .unwrap()
+                .content()
+                .unwrap(),
+            source
+        );
     }
 
     #[test]

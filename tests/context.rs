@@ -23,18 +23,15 @@ fn skill_definitions(
     installer: &Installer,
     selector: Option<&str>,
 ) -> bake::Result<Vec<SkillDefinition>> {
-    let specifications = if let Some(selector) = selector {
-        let Some(specification) = installer.find_specification(selector)? else {
-            return Ok(Vec::new());
-        };
-        vec![specification]
+    let providers = if let Some(selector) = selector {
+        installer.find_provider(selector)?.into_iter().collect()
     } else {
-        installer.specifications().to_vec()
+        installer.providers()?
     };
 
     let mut skills = Vec::new();
-    for specification in specifications {
-        for definition in Package::load(specification)?.definitions {
+    for provider in providers {
+        for definition in provider.definitions {
             if let Definition::Skill(skill) = definition {
                 skills.push(skill);
             }
@@ -198,7 +195,7 @@ fn installs_unfamiliar_context_types_alongside_skills() {
     assert_eq!(skill_definitions(&installer, None).unwrap().len(), 1);
     assert_eq!(
         install_context_and_skills(&installer, None).unwrap(),
-        [format!("{INSTALLED_SKILL_NAME} (docs-provider)")]
+        [INSTALLED_SKILL_NAME.to_owned()]
     );
     assert!(
         root.join(".agents/skills")
@@ -224,7 +221,7 @@ fn discovers_and_installs_skills_declared_in_yaml_frontmatter() {
 
     assert_eq!(
         install_context_and_skills(&installer, Some("docs-provider")).unwrap(),
-        [format!("{INSTALLED_SKILL_NAME} (docs-provider)")]
+        [INSTALLED_SKILL_NAME.to_owned()]
     );
 
     let exclude = fs::read_to_string(root.join(".git/info/exclude")).unwrap();
@@ -446,9 +443,7 @@ fn installs_context_and_skills() {
         .run_arguments(&root, &["agent:context:install".to_owned()])
         .unwrap();
     assert!(output.contains("Installed context from: docs-provider"));
-    assert!(output.contains(&format!(
-        "Installed skills: {INSTALLED_SKILL_NAME} (docs-provider)"
-    )));
+    assert!(output.contains(&format!("Installed skills: {INSTALLED_SKILL_NAME}")));
 
     let installed = root.join(".agents/context/docs-provider");
     assert_eq!(
@@ -606,10 +601,7 @@ fn discovers_multiple_context_providers_and_orders_their_skills() {
     );
     assert_eq!(
         install_context_and_skills(&installer, None).unwrap(),
-        [
-            "docs-provider-initial-gem-setup (docs-provider)",
-            "second-provider-release (second-provider)"
-        ]
+        ["docs-provider-initial-gem-setup", "second-provider-release"]
     );
 }
 
@@ -650,14 +642,14 @@ fn installing_one_provider_refreshes_all_of_its_skills() {
     assert_eq!(
         installer.install(Some("docs-provider")).unwrap().skills,
         [
-            format!("{INSTALLED_SKILL_NAME} (docs-provider)"),
-            "docs-provider-secondary (docs-provider)".to_owned()
+            INSTALLED_SKILL_NAME.to_owned(),
+            "docs-provider-secondary".to_owned()
         ]
     );
     fs::remove_file(provider.join("context/secondary.md")).unwrap();
     assert_eq!(
         installer.install(None).unwrap().skills,
-        [format!("{INSTALLED_SKILL_NAME} (docs-provider)")]
+        [INSTALLED_SKILL_NAME.to_owned()]
     );
 
     let skills_root = root.join(".agents/skills");

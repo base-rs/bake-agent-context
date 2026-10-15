@@ -20,9 +20,11 @@ pub struct SkillDefinition {
     pub name: String,
     pub description: String,
     pub specification: Specification,
-    pub(crate) source_name: String,
+    /// The source path relative to the provider's context directory.
+    pub path: PathBuf,
+    document: Document,
     assets: Option<PathBuf>,
-    content: String,
+    installation_content: String,
 }
 
 impl SkillDefinition {
@@ -31,9 +33,19 @@ impl SkillDefinition {
         self.specification.selector()
     }
 
-    /// Installed instructions, including provider metadata.
+    /// The authored Markdown source.
     pub fn content(&self) -> &str {
-        &self.content
+        &self.document.content
+    }
+
+    /// The source file path.
+    pub fn source_path(&self) -> &Path {
+        &self.document.path
+    }
+
+    /// Generated instructions, including resolved provenance.
+    pub fn installation_content(&self) -> &str {
+        &self.installation_content
     }
 
     /// Apply skill-specific rules to a parsed document.
@@ -87,25 +99,26 @@ impl SkillDefinition {
         metadata.insert("package".into(), specification.name.clone().into());
         metadata.insert("version".into(), specification.version.clone().into());
         frontmatter.insert("metadata".into(), Value::Mapping(metadata));
-        let content = document.render(frontmatter);
+        let installation_content = document.render(frontmatter);
 
         Ok(Self {
             name,
             description,
             specification: specification.clone(),
-            source_name,
+            path: source.file_name().unwrap().into(),
+            document: document.clone(),
             assets,
-            content,
+            installation_content,
         })
     }
 
     /// Write instructions before resources so ownership remains identifiable during refresh.
-    fn write(&self, destination: &Path) -> Result<()> {
+    pub(crate) fn install(&self, destination: &Path) -> Result<()> {
         filesystem::create_dir_all(destination).map_err(|error| {
             Error::new(format!("cannot create {}: {error}", destination.display()))
         })?;
         let path = destination.join("SKILL.md");
-        if let Err(error) = filesystem::write(&path, &self.content) {
+        if let Err(error) = filesystem::write(&path, &self.installation_content) {
             // A failed instruction write has not established usable ownership:
             let _ = filesystem::remove_dir_all(destination);
             return Err(Error::new(format!(
@@ -185,7 +198,7 @@ pub(crate) fn install_definitions(
     for skill in skills {
         let destination = skills_root.join(&skill.name);
         remove_existing(&destination)?;
-        skill.write(&destination)?;
+        skill.install(&destination)?;
     }
 
     // Remove stale skills and update this project's local Git exclusions:
@@ -200,10 +213,7 @@ pub(crate) fn install_definitions(
     if let Some(update) = super::exclude::prepare(root, remaining)? {
         update.apply()?;
     }
-    Ok(skills
-        .iter()
-        .map(|skill| format!("{} ({})", skill.name, skill.package_selector()))
-        .collect())
+    Ok(skills.iter().map(|skill| skill.name.clone()).collect())
 }
 
 pub(crate) fn validate_skill_name(name: &str) -> Result<()> {
@@ -309,24 +319,20 @@ fn path_exists(path: &Path) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::super::installer::{Definition, Installer};
-    use super::super::package::Package;
     use super::*;
     use std::fs;
     use tempfile::tempdir;
 
     fn list_skills(installer: &Installer, selector: Option<&str>) -> Result<Vec<SkillDefinition>> {
-        let specifications = if let Some(selector) = selector {
-            let Some(specification) = installer.find_specification(selector)? else {
-                return Ok(Vec::new());
-            };
-            vec![specification]
+        let providers = if let Some(selector) = selector {
+            installer.find_provider(selector)?.into_iter().collect()
         } else {
-            installer.specifications().to_vec()
+            installer.providers()?
         };
 
         let mut skills = Vec::new();
-        for specification in specifications {
-            for definition in Package::load(specification)?.definitions {
+        for provider in providers {
+            for definition in provider.definitions {
                 if let Definition::Skill(skill) = definition {
                     skills.push(skill);
                 }
@@ -385,8 +391,17 @@ mod tests {
         let installer = Installer::for_test(directory.path(), vec![package.clone()]);
         let skills = list_skills(&installer, None).unwrap();
         assert_eq!(skills[0].name, "provider-workflow");
+        assert_eq!(
+            skills[0].source_path(),
+            package.context_path.join("workflow.md")
+        );
         assert!(skills[0].content().contains("author: Provider"));
-        assert!(skills[0].content().contains("version: 2.0.0"));
+        assert!(
+            skills[0]
+                .installation_content()
+                .contains("ecosystem: cargo")
+        );
+        assert!(skills[0].installation_content().contains("version: 2.0.0"));
         write_skill(
             &package,
             "workflow",
