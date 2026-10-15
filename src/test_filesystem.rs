@@ -19,10 +19,7 @@ pub(crate) enum Operation {
     Read,
     ReadDirectory,
     ReadDirectoryEntry,
-    RemoveDirectory,
     RemoveDirectoryTree,
-    RenameSource,
-    RenameDestination,
     Write,
 }
 
@@ -145,25 +142,9 @@ pub(crate) fn read_dir(path: impl AsRef<Path>) -> io::Result<ReadDir> {
     })
 }
 
-pub(crate) fn remove_dir(path: impl AsRef<Path>) -> io::Result<()> {
-    check_failure(Operation::RemoveDirectory, path.as_ref())?;
-    std::fs::remove_dir(path)
-}
-
 pub(crate) fn remove_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
     check_failure(Operation::RemoveDirectoryTree, path.as_ref())?;
     std::fs::remove_dir_all(path)
-}
-
-pub(crate) fn read(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
-    check_failure(Operation::Read, path.as_ref())?;
-    std::fs::read(path)
-}
-
-pub(crate) fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
-    check_failure(Operation::RenameSource, from.as_ref())?;
-    check_failure(Operation::RenameDestination, to.as_ref())?;
-    std::fs::rename(from, to)
 }
 
 pub(crate) fn write(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> io::Result<()> {
@@ -174,4 +155,38 @@ pub(crate) fn write(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> io::R
 pub(crate) fn copy(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<u64> {
     check_failure(Operation::Copy, from.as_ref())?;
     std::fs::copy(from, to)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dropping_a_guard_preserves_other_threads_failures() {
+        let current_thread = std::thread::current().id();
+        let current_guard = fail_once(Operation::Read, |_| true);
+
+        let other_thread = std::thread::spawn(|| {
+            let guard = fail_once(Operation::Read, |_| true);
+            let thread = std::thread::current().id();
+            drop(guard);
+            thread
+        })
+        .join()
+        .unwrap();
+
+        let failures = FAILURES.lock().unwrap();
+        assert!(
+            failures
+                .iter()
+                .any(|failure| failure.thread == current_thread)
+        );
+        assert!(
+            !failures
+                .iter()
+                .any(|failure| failure.thread == other_thread)
+        );
+        drop(failures);
+        drop(current_guard);
+    }
 }
