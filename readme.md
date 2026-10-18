@@ -57,13 +57,29 @@ This crate includes guides for its users and for other crate authors:
 
 ## Releasing
 
-Prepare a release with `cargo bake cargo:version:patch` (or `minor`, `major`, or `bump --version X.Y.Z`), then run `cargo bake cargo:release` and open a pull request. After review and merge, GitHub Actions publishes the release when the configured `crates-io` environment approves it. Follow the shared [Releasing skill](https://github.com/socketry/socketry-project-rust/blob/main/context/releasing.md) for the standard process.
+Prepare a release with `cargo bake cargo:version:patch` (or `minor`, `major`, or `bump --version X.Y.Z`), commit with a `Release: vVERSION` trailer, then run `cargo bake cargo:release` and open a pull request. After review and merge, GitHub Actions publishes the release when the configured `crates-io` environment approves it. Follow the shared [Releasing skill](https://github.com/core-rs/core-project/blob/main/context/releasing.md) for the standard process.
 
 ## Releases
 
 <!-- bake-readme:releases:start -->
 
 See [releases.md](releases.md) for the full release history.
+
+### v0.4.0
+
+- Use `core-markdown` in place of `socketry-markdown`.
+
+- Resolve context source filenames before installed skill names and show authored content consistently.
+
+- Install unfamiliar context types as ordinary guidance so providers can introduce new types.
+
+- Store resolved skill provenance in `SKILL.md` front matter under `metadata`, with `metadata.type: skill` declaring skills.
+
+- Preserve authored names, descriptions, additional metadata, and the original Markdown body using native front matter AST nodes.
+
+- Share loaded documents between context and skill installation, and use direct writes with rerunnable progress.
+
+- Discover dependency guidance through installed Markdown files and the list/show commands. Remove generated indexes and the `agent:context:index` task.
 
 ### v0.3.3
 
@@ -75,20 +91,17 @@ See [releases.md](releases.md) for the full release history.
 - Require the aggregate test and coverage result for pull request merges.
 - Refresh dependency examples and repository-owned agent guidance.
 
-### v0.3.1
-
-- Require `socketry-markdown` 0.2.0 or newer for safe inline Markdown serialization.
-
 <!-- bake-readme:releases:end -->
 
 ## See Also
 
-- [`bake`](https://github.com/socketry/bake-rust).
-- [`socketry-project`](https://github.com/socketry/socketry-project-rust).
+- [`bake`](https://github.com/core-rs/bake).
+
+- [`core-project`](https://github.com/core-rs/core-project).
 
 ## Contributing
 
-Please open an issue or pull request on [GitHub](https://github.com/socketry/bake-agent-context-rust).
+Please open an issue or pull request on [GitHub](https://github.com/core-rs/bake-agent-context).
 
 Read the [architecture design](context/design.md) for the current Ruby and Rust boundaries and the proposed alignment work.
 

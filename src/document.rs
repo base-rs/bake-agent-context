@@ -4,8 +4,8 @@
 #[cfg(test)]
 use super::test_filesystem as fs;
 use bake::{Error, Result};
+use core_markdown::{ParseOptions, mdast::Node, to_mdast};
 use serde_yaml_ng::{Mapping, Value};
-use socketry_markdown::{ParseOptions, mdast::Node, to_mdast};
 #[cfg(not(test))]
 use std::fs;
 use std::path::{Path, PathBuf};
