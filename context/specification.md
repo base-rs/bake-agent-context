@@ -17,7 +17,7 @@ AI agents and automated tools working with software projects often lack access t
 - **Separation of Concerns**: Clearly separate provider context from consumer context.
 - **Extensibility**: Preserve additional provider-authored metadata alongside the fields defined by this specification.
 
-## 2. Core Concepts
+## 2. Base Concepts
 
 ### 2.1 Context Provider
 

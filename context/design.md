@@ -31,13 +31,13 @@ Ruby uses the gem name as its package selector. Rust uses the crate name when un
 
 `Document.load(path)` and `Document::load(path)` read the source and delegate to `parse`. The parsed value retains the source path, original Markdown, decoded YAML mapping, and the Markdown parser's front matter node or source boundary.
 
-Both implementations use their Markdown parser's front matter node to read and serialize front matter: Markly in Ruby and `core-markdown` in Rust. The document layer decodes and encodes YAML through the node's raw value and classifies context using the nested `metadata.type` field. The skill predicate matches `skill`; all other values follow the ordinary context path. Only a `metadata` mapping is interpreted as context metadata; other authored values remain intact in the source. Ordinary guides can carry their own top-level fields. Front matter uses YAML by default or with the explicit `yaml` language hint. Other front matter languages remain opaque.
+Both implementations use their Markdown parser's front matter node to read and serialize front matter: Markly in Ruby and `base-markdown` in Rust. The document layer decodes and encodes YAML through the node's raw value and classifies context using the nested `metadata.type` field. The skill predicate matches `skill`; all other values follow the ordinary context path. Only a `metadata` mapping is interpreted as context metadata; other authored values remain intact in the source. Ordinary guides can carry their own top-level fields. Front matter uses YAML by default or with the explicit `yaml` language hint. Other front matter languages remain opaque.
 
 A skill definition validates its top-level name and description. It preserves an authored name and uses it for the installed directory. When the name is omitted, it derives `<package>-<filename>`. Resource directories follow the source filename. Description validation trims whitespace to measure the value; the authored value is retained.
 
 To generate installed instructions, the definition merges resolved `ecosystem`, `package`, and `version` into the nested metadata mapping and supplies a missing name. The document writes the YAML into a copy of its front matter AST node and asks the Markdown library to serialize that node. It appends the original body using the parser's source boundary. Links, code blocks, spacing, Unicode, and body line endings retain their original bytes.
 
-The portable YAML form uses `---` delimiters. Rust also recognizes the additional front matter forms supported by `core-markdown`, such as a leading YAML code fence, and retains their delimiter style. Markly's supported syntax defines the Ruby parsing boundary.
+The portable YAML form uses `---` delimiters. Rust also recognizes the additional front matter forms supported by `base-markdown`, such as a leading YAML code fence, and retains their delimiter style. Markly's supported syntax defines the Ruby parsing boundary.
 
 ## Discovery and Loading
 
