@@ -32,10 +32,10 @@ dependencies = [
 
 [[package]]
 name = "bake-agent-context"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "bake",
- "core-markdown",
+ "core-markdown 0.2.0",
  "serde",
  "serde_json",
  "serde_yaml_ng",
@@ -57,16 +57,16 @@ dependencies = [
 
 [[package]]
 name = "bake-cargo"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15a56eb8a167f0937bce8ab1985221d4495126f6db1cf86d21d4947ceff57b02"
+checksum = "5f96d1c8367071572484df8adecb856ee9e4a412eccbe7189ae32c791c59184e"
 dependencies = [
  "bake",
  "bake-license",
  "bake-releases",
+ "core-markdown 0.1.0",
  "serde",
  "serde_json",
- "socketry-markdown 0.1.1",
  "tempfile",
  "toml_edit",
  "ureq",
@@ -74,12 +74,12 @@ dependencies = [
 
 [[package]]
 name = "bake-license"
-version = "0.2.0"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4877b435fe237311d88e546e8fb2b4a9021aff3550b625b8286e27da0ec693fd"
+checksum = "8b8c26cf7448bcbbd9ab961531e7484409f47d0e65b5af34e5dbf7a3ad445be0"
 dependencies = [
  "bake",
- "socketry-markdown 0.1.1",
+ "core-markdown 0.1.0",
  "tempfile",
 ]
 
@@ -96,34 +96,34 @@ dependencies = [
 
 [[package]]
 name = "bake-markdown"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be72df839f4db26a93f2fe0659e57ce7998900b9445b04ba1367d51b4ba38587"
+checksum = "5f1bd6360b257635676292741245853283d8c9285e70a16da020dfd5cf94bcdd"
 dependencies = [
  "bake",
- "socketry-markdown 0.3.0",
+ "core-markdown 0.1.0",
 ]
 
 [[package]]
 name = "bake-readme"
-version = "0.2.3"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48b3733cc48991e6482c04b4997db89f75a7200e2c546c73047bd24e323c3f2a"
+checksum = "11bf6d1221735038caa856a503e964e885d2379c1980518d3ce71165063d4949"
 dependencies = [
  "bake",
+ "core-markdown 0.1.0",
  "serde_json",
- "socketry-markdown 0.1.1",
  "tempfile",
 ]
 
 [[package]]
 name = "bake-releases"
-version = "0.3.0"
+version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8439a25fe3a3192a666570d3d907cfb5bff8fdb5df17c92e495bcd4132ce0283"
+checksum = "cc0fdf00e4504ec28c13e0dcc9be5098d7cc0bb9009c4cb84c34ea683114b212"
 dependencies = [
  "bake",
- "socketry-markdown 0.1.1",
+ "core-markdown 0.1.0",
  "tempfile",
 ]
 
@@ -174,6 +174,15 @@ checksum = "c12c75b62f77c8122be29431bcb028b97fa1e843e5a51cc9967a07ea9f4f08e3"
 dependencies = [
  "regex",
  "unicode-id",
+]
+
+[[package]]
+name = "core-markdown"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f3be0ca6b051ea0a3f33f32c0e8c20172cb240f3b0ec26d9d5ec52e47dad9a7"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]
@@ -683,26 +692,6 @@ name = "smallvec"
 version = "1.16.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9395f0f0eee849a9b707b2f06bb92a6a422090e2123bb2ef8e87a0e61892a8e"
-
-[[package]]
-name = "socketry-markdown"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5713ab1be01960a2cdbb85d6b696063b406300bc5a876a013e23d6e5bf94b19"
-dependencies = [
- "regex",
- "unicode-id",
-]
-
-[[package]]
-name = "socketry-markdown"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c02f802fe678b660dd21a6b6130bc2d0eb3423c24b9f26ebddb46514769e788"
-dependencies = [
- "regex",
- "unicode-id",
-]
 
 [[package]]
 name = "stable_deref_trait"

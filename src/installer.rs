@@ -101,7 +101,7 @@ impl FileDefinition {
     /// Read the authored content of the file.
     pub fn content(&self) -> Result<String> {
         if let Some(document) = &self.document {
-            return Ok(document.content.clone());
+            return Ok(document.content().to_owned());
         }
 
         read_context_file(&self.source_path)
