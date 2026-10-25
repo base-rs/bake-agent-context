@@ -4,7 +4,7 @@
 #[cfg(test)]
 use super::test_filesystem as fs;
 use bake::{Error, Result};
-use core_markdown::{
+use base_markdown::{
     Document as MarkdownDocument, MarkdownOptions, NodeSyntax, ParseOptions,
     stream::{EventKind, Text},
     to_markdown_node,
