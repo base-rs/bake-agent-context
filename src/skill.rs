@@ -35,7 +35,7 @@ impl SkillDefinition {
 
     /// The authored Markdown source.
     pub fn content(&self) -> &str {
-        &self.document.content
+        self.document.content()
     }
 
     /// The source file path.

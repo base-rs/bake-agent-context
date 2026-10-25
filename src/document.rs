@@ -4,7 +4,11 @@
 #[cfg(test)]
 use super::test_filesystem as fs;
 use bake::{Error, Result};
-use core_markdown::{ParseOptions, mdast::Node, to_mdast};
+use core_markdown::{
+    Document as MarkdownDocument, MarkdownOptions, NodeSyntax, ParseOptions,
+    stream::{EventKind, Text},
+    to_markdown_node,
+};
 use serde_yaml_ng::{Mapping, Value};
 #[cfg(not(test))]
 use std::fs;
@@ -14,9 +18,9 @@ use std::path::{Path, PathBuf};
 #[derive(Clone, Debug)]
 pub(crate) struct Document {
     pub(crate) path: PathBuf,
-    pub(crate) content: String,
+    content: String,
     pub(crate) frontmatter: Mapping,
-    node: Option<Node>,
+    syntax: Option<NodeSyntax<'static>>,
     body_start: usize,
 }
 
@@ -33,22 +37,25 @@ impl Document {
         // Let the Markdown parser identify front matter and its source boundary:
         let mut options = ParseOptions::default();
         options.constructs.frontmatter = true;
-        let document = to_mdast(&content, &options)
-            .expect("Markdown parsing without MDX support is infallible");
-        let first = document.children().and_then(|children| children.first());
+        let document = MarkdownDocument::parse(&content, &options)
+            .expect("the built-in Markdown parser produces a valid document");
+        let first = document.children(document.root()).next();
         let mut frontmatter = Mapping::new();
-        let mut node = None;
+        let mut syntax = None;
         let mut body_start = 0;
 
         // Decode the YAML node, retaining the original body bytes:
-        if let Some(Node::Frontmatter(front)) = first {
-            body_start = front
-                .position
-                .as_ref()
-                .expect("parsed nodes have positions")
-                .end
-                .offset;
-            let remaining = &content[body_start..];
+        if let Some((
+            id,
+            NodeSyntax::Frontmatter {
+                info,
+                fence,
+                closing_fence_length,
+            },
+        )) = first.and_then(|id| document.syntax(id).map(|syntax| (id, syntax)))
+        {
+            body_start = document.node(id).unwrap().span.end;
+            let remaining = &document.source()[body_start..];
             body_start += if remaining.starts_with("\r\n") {
                 2
             } else if remaining.starts_with(['\r', '\n']) {
@@ -56,13 +63,23 @@ impl Document {
             } else {
                 0
             };
-            if front.language() == Some("yaml") {
-                let value: Value = serde_yaml_ng::from_str(&front.value).map_err(|error| {
-                    Error::new(format!(
-                        "invalid YAML front matter in {}: {error}",
-                        path.display()
-                    ))
-                })?;
+            let info = info.resolve(document.source()).unwrap();
+            let language = info
+                .split_ascii_whitespace()
+                .next()
+                .or(match fence.character {
+                    '-' => Some("yaml"),
+                    '+' => Some("toml"),
+                    _ => None,
+                });
+            if language == Some("yaml") {
+                let value: Value = serde_yaml_ng::from_str(document.frontmatter_value(id).unwrap())
+                    .map_err(|error| {
+                        Error::new(format!(
+                            "invalid YAML front matter in {}: {error}",
+                            path.display()
+                        ))
+                    })?;
                 frontmatter = match value {
                     Value::Null => Mapping::new(),
                     Value::Mapping(mapping) => mapping,
@@ -74,16 +91,24 @@ impl Document {
                     }
                 };
             }
-            node = first.cloned();
+            syntax = Some(NodeSyntax::Frontmatter {
+                info: Text::from(info.to_owned()),
+                fence,
+                closing_fence_length,
+            });
         }
 
         Ok(Self {
             path: path.to_owned(),
             content,
             frontmatter,
-            node,
+            syntax,
             body_start,
         })
+    }
+
+    pub(crate) fn content(&self) -> &str {
+        &self.content
     }
 
     /// Return the extensible metadata mapping, when one is present.
@@ -101,19 +126,29 @@ impl Document {
 
     /// Write the source that was loaded and validated.
     pub(crate) fn write(&self, path: &Path) -> Result<()> {
-        fs::write(path, &self.content)
+        fs::write(path, self.content())
             .map_err(|error| Error::new(format!("cannot write {}: {error}", path.display())))
     }
 
     /// Serialize edited front matter through its AST node and retain the source body.
     pub(crate) fn render(&self, frontmatter: Mapping) -> String {
-        let Some(Node::Frontmatter(mut node)) = self.node.clone() else {
-            unreachable!("skill documents have a parsed front matter node");
-        };
-        node.value =
-            serde_yaml_ng::to_string(&frontmatter).expect("parsed YAML mappings are serializable");
-        let mut output = Node::Frontmatter(node).to_markdown();
-        output.push_str(&self.content[self.body_start..]);
+        let mut document = MarkdownDocument::parse("", &ParseOptions::default()).unwrap();
+        let node = document
+            .append_child(
+                document.root(),
+                EventKind::Opaque {
+                    value: Text::from(
+                        serde_yaml_ng::to_string(&frontmatter)
+                            .expect("parsed YAML mappings are serializable"),
+                    ),
+                    block: true,
+                },
+            )
+            .unwrap();
+        document.set_syntax(node, self.syntax.clone()).unwrap();
+        let mut output = to_markdown_node(&document, node, &MarkdownOptions::default())
+            .expect("edited frontmatter has valid Markdown syntax");
+        output.push_str(&self.content()[self.body_start..]);
         output
     }
 }
@@ -134,7 +169,7 @@ mod tests {
             metadata.insert("license".into(), "Apache-2.0".into());
             let output = document.render(metadata);
             let installed = Document::parse(output, Path::new("SKILL.md")).unwrap();
-            assert_eq!(&installed.content[installed.body_start..], body);
+            assert_eq!(&installed.content()[installed.body_start..], body);
             assert_eq!(
                 installed.frontmatter["license"].as_str(),
                 Some("Apache-2.0")
