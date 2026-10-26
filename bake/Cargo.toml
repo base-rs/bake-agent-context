@@ -5,7 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
-core-project = ">=0.1.0"
+base-project = ">=0.1.0"
 bake = ">=0.20, <1"
 bake-agent-context = { version = "0.4.2", path = ".." }
 bake-cargo = { version = "0.5.0" }
