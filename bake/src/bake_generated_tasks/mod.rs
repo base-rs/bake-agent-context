@@ -6,4 +6,4 @@ use bake_agent_context as _;
 use bake_cargo as _;
 use bake_license as _;
 use bake_releases as _;
-use core_project as _;
+use base_project as _;
