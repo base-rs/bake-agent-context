@@ -62,6 +62,7 @@ Prepare a release with `cargo bake cargo:version:patch` (or `minor`, `major`, or
 ## Releases
 
 <!-- bake-readme:releases:start -->
+
 See [releases.md](releases.md) for the full release history.
 
 ### v0.4.2
@@ -87,6 +88,7 @@ See [releases.md](releases.md) for the full release history.
 - Share loaded documents between context and skill installation, and use direct writes with rerunnable progress.
 
 - Discover dependency guidance through installed Markdown files and the list/show commands. Remove generated indexes and the `agent:context:index` task.
+
 <!-- bake-readme:releases:end -->
 
 ## See Also
