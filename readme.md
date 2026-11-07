@@ -65,6 +65,10 @@ Prepare a release with `cargo bake cargo:version:patch` (or `minor`, `major`, or
 
 See [releases.md](releases.md) for the full release history.
 
+### v0.4.3
+
+- Parse and write front matter with the pure-Rust `yaml-rust2`, removing the dependency on the unmaintained `unsafe-libyaml`.
+
 ### v0.4.2
 
 - Depend on `base-markdown` under the `base-rs` organization, replacing `core-markdown`.
@@ -72,22 +76,6 @@ See [releases.md](releases.md) for the full release history.
 ### v0.4.1
 
 - Migrate to the source-backed `core-markdown` document AST, preserving supported Markdown behavior and source bytes.
-
-### v0.4.0
-
-- Use `core-markdown` in place of `socketry-markdown`.
-
-- Resolve context source filenames before installed skill names and show authored content consistently.
-
-- Install unfamiliar context types as ordinary guidance so providers can introduce new types.
-
-- Store resolved skill provenance in `SKILL.md` front matter under `metadata`, with `metadata.type: skill` declaring skills.
-
-- Preserve authored names, descriptions, additional metadata, and the original Markdown body using native front matter AST nodes.
-
-- Share loaded documents between context and skill installation, and use direct writes with rerunnable progress.
-
-- Discover dependency guidance through installed Markdown files and the list/show commands. Remove generated indexes and the `agent:context:index` task.
 
 <!-- bake-readme:releases:end -->
 
