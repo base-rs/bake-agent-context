@@ -54,9 +54,9 @@ dependencies = [
 
 [[package]]
 name = "bake-cargo"
-version = "0.5.4"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79ff5b8e99d484d51e46ea5e4a76f1e86c8751a7c92e62fa6825ab8858042c4b"
+checksum = "38417e4c2a0b8d6d4f84e6be83de0e3b848566ab99a04a53775b7c9811565b99"
 dependencies = [
  "bake",
  "bake-license",
@@ -71,9 +71,9 @@ dependencies = [
 
 [[package]]
 name = "bake-license"
-version = "0.2.5"
+version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b873096492b2786ea7c0dd8ccc588b5919a052a13db753a5098950eb5e5e83e"
+checksum = "e35b8a1c3070a67c626000ea8b1793d0170d5d0bd2fdb976b0c4e067bbe023b8"
 dependencies = [
  "bake",
  "base-markdown",
@@ -126,9 +126,9 @@ dependencies = [
 
 [[package]]
 name = "bake-test"
-version = "0.3.3"
+version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91359fe9b1cff2bf6e45a35be927e601ec3ad24412ef70adaa2a90aac9fbe4bb"
+checksum = "02a9b131698824d0a8e0328e86b1c8d270b4644901a019ac46e4ad38fee005a8"
 dependencies = [
  "bake",
  "serde_json",
@@ -152,9 +152,9 @@ dependencies = [
 
 [[package]]
 name = "base-project"
-version = "0.1.0"
+version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9e9c9d8865b2e1e53ee684ed25190c2c61b990e9d7e912069ced53270a64d2f"
+checksum = "17105821bc688644e3193269a7e2c005a53f44b16981094e0771f802f8eb1e1e"
 dependencies = [
  "bake",
  "bake-agent-context",
@@ -165,7 +165,14 @@ dependencies = [
  "bake-releases",
  "bake-test",
  "base-design",
+ "base-security",
 ]
+
+[[package]]
+name = "base-security"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0cafbfb3e7e5ce421ad36126cde1382cf6e5c994e17ca25701bc8a94fe24650e"
 
 [[package]]
 name = "base64"
