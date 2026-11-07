@@ -25,8 +25,8 @@ unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage)"] }
 bake = "0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-serde_yaml_ng = "0.10"
 base-markdown = "0.1.0"
+yaml-rust2 = { version = "0.13", default-features = false }
 
 [patch.crates-io]
 bake-agent-context = { path = "." }
