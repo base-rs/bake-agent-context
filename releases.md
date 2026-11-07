@@ -1,5 +1,9 @@
 # Releases
 
+## Unreleased
+
+- Parse and write front matter with the pure-Rust `yaml-rust2`, removing the dependency on the unmaintained `unsafe-libyaml`.
+
 ## v0.4.2
 
 - Depend on `base-markdown` under the `base-rs` organization, replacing `core-markdown`.

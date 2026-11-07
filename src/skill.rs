@@ -1,17 +1,17 @@
 // Released under the MIT License.
 // Copyright, 2026, by Samuel Williams.
 
-use super::document::Document;
+use super::document::{Document, MappingFields};
 use super::installer::{Specification, remove_existing};
 use super::ownership::installed_skill_owners;
 #[cfg(test)]
 use super::test_filesystem as filesystem;
 use bake::{Error, Result};
-use serde_yaml_ng::Value;
 use std::collections::HashSet;
 #[cfg(not(test))]
 use std::fs as filesystem;
 use std::path::{Path, PathBuf};
+use yaml_rust2::Yaml;
 
 /// A skill declared by a dependency context document.
 #[derive(Clone, Debug)]
@@ -63,8 +63,8 @@ impl SkillDefinition {
 
         // Preserve authored names and derive missing names from the provider and file:
         let source_name = source_name(source)?;
-        let name = match document.frontmatter.get("name") {
-            Some(Value::String(name)) => name.clone(),
+        let name = match document.frontmatter.field("name") {
+            Some(Yaml::String(name)) => name.clone(),
             None => format!(
                 "{}-{source_name}",
                 specification.name.to_ascii_lowercase().replace('_', "-")
@@ -79,8 +79,7 @@ impl SkillDefinition {
         validate_skill_name(&name)?;
         let description = document
             .frontmatter
-            .get("description")
-            .and_then(Value::as_str)
+            .string_field("description")
             .filter(|value| !value.trim().is_empty() && value.trim().chars().count() <= 1024)
             .ok_or_else(|| {
                 Error::new(format!(
@@ -93,12 +92,12 @@ impl SkillDefinition {
         // Add resolved provenance while retaining the provider's remaining metadata:
         let assets = skill_assets_path(&specification.context_path, &source_name)?;
         let mut frontmatter = document.frontmatter.clone();
-        frontmatter.insert("name".into(), name.clone().into());
+        frontmatter.insert_field("name", Yaml::String(name.clone()));
         let mut metadata = document.metadata().cloned().unwrap_or_default();
-        metadata.insert("ecosystem".into(), "cargo".into());
-        metadata.insert("package".into(), specification.name.clone().into());
-        metadata.insert("version".into(), specification.version.clone().into());
-        frontmatter.insert("metadata".into(), Value::Mapping(metadata));
+        metadata.insert_field("ecosystem", Yaml::String("cargo".to_owned()));
+        metadata.insert_field("package", Yaml::String(specification.name.clone()));
+        metadata.insert_field("version", Yaml::String(specification.version.clone()));
+        frontmatter.insert_field("metadata", Yaml::Hash(metadata));
         let installation_content = document.render(frontmatter);
 
         Ok(Self {

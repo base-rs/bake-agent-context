@@ -1,12 +1,11 @@
 // Released under the MIT License.
 // Copyright, 2026, by Samuel Williams.
 
-use super::document::Document;
+use super::document::{Document, MappingFields};
 use super::skill::validate_skill_name;
 #[cfg(test)]
 use super::test_filesystem as filesystem;
 use bake::{Error, Result};
-use serde_yaml_ng::Value;
 use std::collections::BTreeMap;
 #[cfg(not(test))]
 use std::fs as filesystem;
@@ -44,15 +43,12 @@ fn load_skill_owner(directory: &Path) -> Result<Option<SkillOwner>> {
         return Ok(None);
     };
     let fields = ["ecosystem", "package", "version"];
-    if metadata.get("type").and_then(Value::as_str) != Some("skill")
-        || !metadata.contains_key("ecosystem")
-    {
+    if metadata.string_field("type") != Some("skill") || metadata.field("ecosystem").is_none() {
         return Ok(None);
     }
     if !fields.iter().all(|field| {
         metadata
-            .get(*field)
-            .and_then(Value::as_str)
+            .string_field(field)
             .is_some_and(|value| !value.trim().is_empty())
     }) {
         return Err(Error::new(format!(
@@ -61,8 +57,8 @@ fn load_skill_owner(directory: &Path) -> Result<Option<SkillOwner>> {
         )));
     }
     let owner = SkillOwner {
-        ecosystem: metadata["ecosystem"].as_str().unwrap().to_owned(),
-        package: metadata["package"].as_str().unwrap().to_owned(),
+        ecosystem: metadata.string_field("ecosystem").unwrap().to_owned(),
+        package: metadata.string_field("package").unwrap().to_owned(),
     };
     Ok(Some(owner))
 }
