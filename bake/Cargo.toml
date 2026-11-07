@@ -7,7 +7,7 @@ publish = false
 [dependencies]
 base-project = ">=0.1.7"
 bake = ">=0.20, <1"
-bake-agent-context = { version = "0.4.2", path = ".." }
+bake-agent-context = { version = "0.4.3", path = ".." }
 bake-cargo = { version = "0.9.1" }
 bake-license = { version = "0.2.0" }
 bake-releases = { version = "0.3.0" }
