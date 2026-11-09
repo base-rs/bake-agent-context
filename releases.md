@@ -1,6 +1,6 @@
 # Releases
 
-## Unreleased
+## v0.4.4
 
 - Declare Rust 1.88 as the minimum supported version in `rust-version`, as required by the let-chains in this crate and in `bake` 0.20.
 
