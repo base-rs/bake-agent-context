@@ -21,7 +21,7 @@ Follow the Conventions guide from `socketry-project` for construction, responsib
 - Do not poll a task concurrently or poll a completed future again.
 - Pin preserves an address; Send permits transfer between threads. Neither implies the other. A future can be Send without being Unpin.
 - A Send future can contain non-Send local values during a poll when those values are not retained across its suspension points. Suspending an ordinary call stack inside poll invalidates attempts to infer stack migration safety from the outer future's Send bound.
-- The future foundation uses ordinary polling and `.await`. Do not restore per-task stacks or hidden nested block\_on calls as a compatibility shortcut.
+- The future foundation uses ordinary polling and `.await`. Do not restore per-task stacks or hidden nested block_on calls as a compatibility shortcut.
 - Concrete I/O and timer futures can require particular runtime services even though they implement the standard Future trait. Trait adaptation does not replace those services. Call Socketry's native backends selectors; dependencies such as Tokio may use their own terminology.
 
 ## Tasks and cleanup

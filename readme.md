@@ -65,6 +65,10 @@ Prepare a release with `cargo bake cargo:version:patch` (or `minor`, `major`, or
 
 See [releases.md](releases.md) for the full release history.
 
+### v0.4.4
+
+- Declare Rust 1.88 as the minimum supported version in `rust-version`, as required by the let-chains in this crate and in `bake` 0.20.
+
 ### v0.4.3
 
 - Parse and write front matter with the pure-Rust `yaml-rust2`, removing the dependency on the unmaintained `unsafe-libyaml`.
@@ -72,10 +76,6 @@ See [releases.md](releases.md) for the full release history.
 ### v0.4.2
 
 - Depend on `base-markdown` under the `base-rs` organization, replacing `core-markdown`.
-
-### v0.4.1
-
-- Migrate to the source-backed `core-markdown` document AST, preserving supported Markdown behavior and source bytes.
 
 <!-- bake-readme:releases:end -->
 
