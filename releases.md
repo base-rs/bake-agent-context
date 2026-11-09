@@ -1,5 +1,9 @@
 # Releases
 
+## Unreleased
+
+- Declare Rust 1.88 as the minimum supported version in `rust-version`, as required by the let-chains in this crate and in `bake` 0.20.
+
 ## v0.4.3
 
 - Parse and write front matter with the pure-Rust `yaml-rust2`, removing the dependency on the unmaintained `unsafe-libyaml`.
